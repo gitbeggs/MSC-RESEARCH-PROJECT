@@ -1,4 +1,4 @@
-RNA SEQ WORKFLOW MAPPING TO BACILLUS SUBTILIS GENOME
+#RNA SEQ WORKFLOW MAPPING TO BACILLUS SUBTILIS GENOME
 
 echo "The first step is to concatenate the R1 files and the R2 files together"
 

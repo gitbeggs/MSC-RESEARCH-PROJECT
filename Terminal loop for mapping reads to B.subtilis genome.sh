@@ -1,4 +1,12 @@
-#Terminal loop for mapping reads to B.subtilis genome
+##Terminal loop for mapping reads to B.subtilis genome##
+
+#Creation of loop using nano function
+
+chmod +x process_26_to_53
+
+./ process_1_to_53
+
+#Genome mapping for loop
 
 # Loop through samples 1 to 53
 for i in {1..53}; do

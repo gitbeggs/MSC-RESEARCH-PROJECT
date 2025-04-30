@@ -61,6 +61,13 @@ Day 14 without aphids: Samples 50–53
 
 Raw Illumina paired-end reads were processed through a multi-step workflow to produce genome-aligned BAM files for quantifying bacterial gene expression. Mapping the reads of each samples rhizosphere to Acidovorax radicis genome then to Bacillius Subtillis, to quantify the gene expression of each bacteria across the 53 samples.
 
+Section 1: Terminal processing of raw reads into genome mapped bam files for A.radicis and B.subtilis
+
+Section 2: Generation of counts and TPMs matrices using BAM files on R studio (4.3.2)
+
+Section 3: Pathway analysis
+
+# Section 1
 # Terminal processing of raw reads (shell scripts attached in repoistory)
 
 i) Terminal pipeline for transcript mapping to A. Radicis: RAW READS TO BAM FILES BASH CODE (acidovorax radicis).sh

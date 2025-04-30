@@ -9,9 +9,12 @@ RNA-seq enables the quantification of gene expression by sequencing RNA transcri
 
 The main goal of this project is to identify differentially expressed genes (DEGs) associated with microbial inoculation compared to the control condition. We assess whether inoculation with A. radicis or B. subtilis leads to transcriptional changes in the rhizosphere, and how these effects differ in the presence or absence of aphids. DEGs were analysed at each time point to observe temporal dynamics in the root microbiome, with the broader aim of understanding whether these microbial interactions contribute to aphid suppression—a potential mechanism of natural pest control in crops.
 
+<img width="1009" alt="Screenshot 2025-04-30 at 12 08 28" src="https://github.com/user-attachments/assets/4607399c-9fa9-4e35-93aa-fdfc3748e5f3" />
+
 # Experimental Design
 
 Samples: 53 rhizosphere samples (barley root tips)
+
 
 # Treatments:
 Conditions: Each treatment replicated with and without aphids

@@ -15,6 +15,7 @@ Samples: 53 rhizosphere samples (barley root tips)
 
 # Treatments:
 Conditions: Each treatment replicated with and without aphids
+
 Time Points: Day 1, Day 7, Day 14 (no samples for Day 7 without aphids)
 
 # Acidovorax radicis

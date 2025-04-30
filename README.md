@@ -115,29 +115,28 @@ Read coverage across bacterial genes was calculated for each of the 53 samples t
 
 
 
-# Section 2: R studio Analysis: Generation of counts and TPM files
+# Section 2: R Studio Analysis: Generation of Counts and TPM Files
 
+### 1. Processing the A. radicis and B.subtilis Genome file (gff):
+   
+The GFF file for A. radicis and B. subtilis was parsed to extract gene-specific information such as gene ID, locus tag, and gene name. Gene lengths were calculated, and missing gene names were replaced with gene IDs if necessary.
 
-### 1. Processing the A. radicis and B.subtilis Genome:
+### 3. Mapping Data from BAM Files:
 
-GFF file for A.radicis and B.subtilis is parsed to extract gene-specific information such as gene ID, locus tag, and gene name. Gene lengths are calculated, and missing gene names are replaced with gene IDs if necessary.
+BAM files from 53 samples were loaded, containing reads aligned to the A. radicis genome. The summarizeOverlaps function generated a count matrix to quantify gene expression.
 
-### 2. Mapping Data from BAM Files:
+### 4. Normalization to TPM:
 
-BAM files from 53 samples are loaded, containing reads aligned to the A. radicis genome. The summarizeOverlaps function generates a count matrix to quantify gene expression.
+Raw counts were normalized to Transcripts Per Million (TPM) to account for gene length and sequencing depth, enabling cross-sample comparison.
 
-### 3. Normalization to TPM:
+### 5. Reordering Samples:
 
-Raw counts are normalized to Transcripts Per Million (TPM) to account for gene length and sequencing depth, enabling cross-sample comparison.
+Samples were reordered based on experimental conditions, and a metadata file was created to associate each sample with its treatment and sampling time.
 
-### 4. Reordering Samples:
+### 6. Exporting Results to csv files:
 
-Samples are reordered based on experimental conditions, and a metadata file is created to associate each sample with its treatment and sampling time.
+The raw count and TPM matrices were exported to CSV files. A reordered version of the matrices was also saved to match the experimental design.
 
-### 5. Exporting Results to csv files:
-
-The raw count and TPM matrices are exported to CSV files. A reordered version of the matrices is also saved to match the experimental design.
-
-# Section 3: DESEQ2 Analysis: Volcano plot, heatmap, PCA and DEGs bar chart visulations 
+# Section 3: DESeq2 Analysis: Volcano Plot, Heatmap, PCA, and DEGs Bar Chart Visualizations
 
 

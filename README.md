@@ -103,8 +103,9 @@ Tool: samtools
 
 Read coverage across bacterial genes was calculated for each of the 53 samples to assess genome coverage.
 
+# For mapping of reads to the B.subtillis a shell for loop was created for efficiency using nano function
 
-
+See file: 
 
 
 

@@ -1,4 +1,4 @@
-<img width="690" alt="Screenshot 2025-04-30 at 12 06 53" src="https://github.com/user-attachments/assets/df0c7c9a-dd31-44fb-b29c-1983573d2597" /># MSC-RESEARCH-PROJECT
+# MSC-RESEARCH-PROJECT
 Code repository for life 703 aphid project.
 
 # Project Overview

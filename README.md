@@ -123,7 +123,7 @@ The GFF file for A. radicis and B. subtilis was parsed to extract gene-specific 
 
 ### 3. Mapping Data from BAM Files:
 
-BAM files from 53 samples were loaded, containing reads aligned to the A. radicis genome. The summarizeOverlaps function generated a count matrix to quantify gene expression.
+BAM files from 53 samples were loaded, containing reads aligned to the A. radicis genome then to B. subtilis genome. The summarizeOverlaps function generated a count matrix to quantify gene expression.
 
 ### 4. Normalization to TPM:
 

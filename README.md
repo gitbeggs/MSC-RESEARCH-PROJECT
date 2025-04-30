@@ -103,9 +103,11 @@ Tool: samtools
 
 Read coverage across bacterial genes was calculated for each of the 53 samples to assess genome coverage.
 
-# For mapping of reads to the B.subtillis a shell for loop was created for efficiency using nano function
+# Read Mapping to Bacillus subtilis Genome Using Shell For Loop
 
-See file: 
+A shell for loop using the nano function was created to efficiently map reads to the Bacillus subtilis genome, automating the process for multiple samples and reducing redundancy.
+
+See file: Terminal loop for mapping reads to B.subtilis genome.sh
 
 
 

@@ -20,23 +20,35 @@ Time Points: Day 1, Day 7, Day 14 (no samples for Day 7 without aphids)
 
 # Acidovorax radicis
 Day 1 with aphids: Samples 1–4
+
 Day 7 with aphids: Samples 13–16
+
 Day 14 with aphids: Samples 22–25
+
 Day 1 without aphids: Samples 34–37
+
 Day 14 without aphids: Samples 44–46
 
 # Bacillus subtilis
 Day 1 with aphids: Samples 5–8
+
 Day 7 with aphids: Samples 17–19
+
 Day 14 with aphids: Samples 26–29
+
 Day 1 without aphids: Samples 38–41
+
 Day 14 without aphids: Samples 47–49
 
 # No Bacteria (Control)
 Day 1 with aphids: Samples 9–12
+
 Day 7 with aphids: Samples 20–21
+
 Day 14 with aphids: Samples 30–33
+
 Day 1 without aphids: Samples 42–43
+
 Day 14 without aphids: Samples 50–53
 
 # Processing Pipeline Summary
@@ -47,6 +59,7 @@ Raw Illumina paired-end reads were processed through a multi-step workflow to pr
 
 # 1. Adapter Trimming
 Tool: bbduk.sh
+
 Adapter sequences were trimmed from raw reads to improve mapping accuracy.
 
 # 2. Read Concatenation
@@ -54,23 +67,28 @@ Each sample had two R1 and two R2 FASTQ files, which were concatenated (R1s toge
 
 # 3. rRNA Removal
 Tool: bbduk.sh with SILVA rRNA database
+
 Reads matching ribosomal RNA sequences were removed to enrich for messenger RNA (mRNA).
 
 # 4. Re-pairing of Reads
 Tool: repair.sh
+
 Following rRNA filtering, paired-end reads were re-synchronized to ensure valid pairs.
 
 # 5. Genome Mapping
 Tool: bbmap.sh
+
 Filtered reads were aligned to the Acidovorax radicis and Bacillus subtilis reference genomes, depending on the treatment condition.
 Purpose: Quantify gene expression in bacteria inoculated into the rhizosphere, with or without aphid presence, compared to uninoculated controls.
 
 # 6. SAM to BAM Conversion
 Tool: samtools
+
 SAM alignment files were converted to sorted and indexed BAM files for efficient storage and analysis.
 
 # 7. Coverage Estimation
 Tool: samtools
+
 Read coverage across bacterial genes was calculated for each of the 53 samples to assess genome coverage.
 
 

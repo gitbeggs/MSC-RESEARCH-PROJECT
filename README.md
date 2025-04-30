@@ -91,7 +91,11 @@ Following rRNA filtering, paired-end reads were re-synchronized to ensure valid 
 Tool: bbmap.sh
 
 Filtered reads were aligned to the Acidovorax radicis and Bacillus subtilis reference genomes, depending on the treatment condition.
-Purpose: Quantify gene expression in bacteria inoculated into the rhizosphere, with or without aphid presence, compared to uninoculated controls.
+Purpose: Quantify gene expression of A.radicis and B.subtilis inoculated barley plants using rhizosphere sample (microbiome indicator), with or without aphid presence, compared to uninoculated controls.
+
+For the mapping to the B.subtilis genome a shell for loop using the nano function was created to efficiently map reads to the Bacillus subtilis genome, automating the process for multiple samples and reducing redundancy.
+
+See file: Terminal loop for mapping reads to B.subtilis genome.sh
 
 # 6. SAM to BAM Conversion
 Tool: samtools
@@ -103,11 +107,7 @@ Tool: samtools
 
 Read coverage across bacterial genes was calculated for each of the 53 samples to assess genome coverage.
 
-# Read Mapping to Bacillus subtilis Genome Using Shell For Loop
 
-A shell for loop using the nano function was created to efficiently map reads to the Bacillus subtilis genome, automating the process for multiple samples and reducing redundancy.
-
-See file: Terminal loop for mapping reads to B.subtilis genome.sh
 
 
 

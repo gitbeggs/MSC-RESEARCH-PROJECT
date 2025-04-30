@@ -65,7 +65,7 @@ Section 1: Terminal processing of raw reads into genome mapped bam files for A.r
 
 Section 2: Generation of counts and TPMs matrices using BAM files on R studio (4.3.2)
 
-Section 3: Pathway analysis
+Section 3: DESEQ2 Analysis: Volcano plot, heatmap, PCA and DEGs bar chart visulations 
 
 # Section 1: Terminal processing of raw reads into genome mapped BAM files (shell scripts attached in repoistory)
 
@@ -118,25 +118,26 @@ Read coverage across bacterial genes was calculated for each of the 53 samples t
 # Section 2: R studio Analysis: Generation of counts and TPM files
 
 
-1. Processing the A. radicis and B.subtilis Genome:
+# 1. Processing the A. radicis and B.subtilis Genome:
 
 GFF file for A.radicis and B.subtilis is parsed to extract gene-specific information such as gene ID, locus tag, and gene name. Gene lengths are calculated, and missing gene names are replaced with gene IDs if necessary.
 
-2. Mapping Data from BAM Files:
+# 2. Mapping Data from BAM Files:
 
 BAM files from 53 samples are loaded, containing reads aligned to the A. radicis genome. The summarizeOverlaps function generates a count matrix to quantify gene expression.
 
-3. Normalization to TPM:
+# 3. Normalization to TPM:
 
 Raw counts are normalized to Transcripts Per Million (TPM) to account for gene length and sequencing depth, enabling cross-sample comparison.
 
-4. Reordering Samples:
+# 4. Reordering Samples:
 
 Samples are reordered based on experimental conditions, and a metadata file is created to associate each sample with its treatment and sampling time.
 
-5. Exporting Results to csv files:
+# 5. Exporting Results to csv files:
 
 The raw count and TPM matrices are exported to CSV files. A reordered version of the matrices is also saved to match the experimental design.
 
+# Section 3: DESEQ2 Analysis: Volcano plot, heatmap, PCA and DEGs bar chart visulations 
 
 

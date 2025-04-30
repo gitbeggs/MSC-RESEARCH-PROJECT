@@ -1,4 +1,4 @@
-# MSC-RESEARCH-PROJECT
+<img width="690" alt="Screenshot 2025-04-30 at 12 06 53" src="https://github.com/user-attachments/assets/df0c7c9a-dd31-44fb-b29c-1983573d2597" /># MSC-RESEARCH-PROJECT
 Code repository for life 703 aphid project.
 
 # Project Overview
@@ -51,6 +51,9 @@ Day 1 without aphids: Samples 42–43
 
 Day 14 without aphids: Samples 50–53
 
+<img width="697" alt="Screenshot 2025-04-30 at 12 07 12" src="https://github.com/user-attachments/assets/42720d1c-4f3a-4b6e-b04d-e45d2d1d495c" />
+
+
 # Processing Pipeline Summary
 
 Raw Illumina paired-end reads were processed through a multi-step workflow to produce genome-aligned BAM files for quantifying bacterial gene expression. Mapping the reads of each samples rhizosphere to Acidovorax radicis genome then to Bacillius Subtillis, to quantify the gene expression of each bacteria across the 53 samples.
@@ -96,6 +99,7 @@ SAM alignment files were converted to sorted and indexed BAM files for efficient
 Tool: samtools
 
 Read coverage across bacterial genes was calculated for each of the 53 samples to assess genome coverage.
+
 
 
 

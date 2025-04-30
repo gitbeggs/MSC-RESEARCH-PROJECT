@@ -55,7 +55,7 @@ Day 14 without aphids: Samples 50–53
 
 Raw Illumina paired-end reads were processed through a multi-step workflow to produce genome-aligned BAM files for quantifying bacterial gene expression. Mapping the reads of each samples rhizosphere to Acidovorax radicis genome then to Bacillius Subtillis, to quantify the gene expression of each bacteria across the 53 samples.
 
-#TERMINAL PROCESSING OF RAW READS TO BAM FILES (see 
+# TERMINAL PROCESSING OF RAW READS TO BAM FILES (see 
 
 # 1. Adapter Trimming
 Tool: bbduk.sh

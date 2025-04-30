@@ -16,12 +16,12 @@ The main goal of this project is to identify differentially expressed genes (DEG
 Samples: 53 rhizosphere samples (barley root tips)
 
 
-# Treatments:
+## Treatments:
 Conditions: Each treatment replicated with and without aphids
 
 Time Points: Day 1, Day 7, Day 14 (no samples for Day 7 without aphids)
 
-# Acidovorax radicis
+### Acidovorax radicis
 Day 1 with aphids: Samples 1–4
 
 Day 7 with aphids: Samples 13–16
@@ -32,7 +32,7 @@ Day 1 without aphids: Samples 34–37
 
 Day 14 without aphids: Samples 44–46
 
-# Bacillus subtilis
+### Bacillus subtilis
 Day 1 with aphids: Samples 5–8
 
 Day 7 with aphids: Samples 17–19
@@ -43,7 +43,7 @@ Day 1 without aphids: Samples 38–41
 
 Day 14 without aphids: Samples 47–49
 
-# No Bacteria (Control)
+### No Bacteria (Control)
 Day 1 with aphids: Samples 9–12
 
 Day 7 with aphids: Samples 20–21
@@ -73,27 +73,27 @@ i) Terminal pipeline for transcript mapping to A. Radicis: RAW READS TO BAM FILE
 
 ii) Terminal pipeline for transcript mapping to B.subtilis genome: RNA SEQ WORKFLOW MAPPING TO BACILLUS SUBTILIS GENOME.sh
 
-# Breakdown of raw reads processing pipeline
+## Breakdown of raw reads processing pipeline
 
-# 1. Adapter Trimming
+### 1. Adapter Trimming
 Tool: bbduk.sh
 
 Adapter sequences were trimmed from raw reads to improve mapping accuracy.
 
-# 2. Read Concatenation
+### 2. Read Concatenation
 Each sample had two R1 and two R2 FASTQ files, which were concatenated (R1s together, R2s together) to streamline processing.
 
-# 3. rRNA Removal
+### 3. rRNA Removal
 Tool: bbduk.sh with SILVA rRNA database
 
 Reads matching ribosomal RNA sequences were removed to enrich for messenger RNA (mRNA).
 
-# 4. Re-pairing of Reads
+### 4. Re-pairing of Reads
 Tool: repair.sh
 
 Following rRNA filtering, paired-end reads were re-synchronized to ensure valid pairs.
 
-# 5. Genome Mapping
+### 5. Genome Mapping
 Tool: bbmap.sh
 
 Filtered reads were aligned to the Acidovorax radicis and Bacillus subtilis reference genomes, depending on the treatment condition.
@@ -103,12 +103,12 @@ For the mapping to the B.subtilis genome a shell for loop using the nano functio
 
 See file: Terminal loop for mapping reads to B.subtilis genome.sh
 
-# 6. SAM to BAM Conversion
+### 6. SAM to BAM Conversion
 Tool: samtools
 
 SAM alignment files were converted to sorted and indexed BAM files for efficient storage and analysis.
 
-# 7. Coverage Estimation
+### 7. Coverage Estimation
 Tool: samtools
 
 Read coverage across bacterial genes was calculated for each of the 53 samples to assess genome coverage.
@@ -118,23 +118,23 @@ Read coverage across bacterial genes was calculated for each of the 53 samples t
 # Section 2: R studio Analysis: Generation of counts and TPM files
 
 
-# 1. Processing the A. radicis and B.subtilis Genome:
+### 1. Processing the A. radicis and B.subtilis Genome:
 
 GFF file for A.radicis and B.subtilis is parsed to extract gene-specific information such as gene ID, locus tag, and gene name. Gene lengths are calculated, and missing gene names are replaced with gene IDs if necessary.
 
-# 2. Mapping Data from BAM Files:
+### 2. Mapping Data from BAM Files:
 
 BAM files from 53 samples are loaded, containing reads aligned to the A. radicis genome. The summarizeOverlaps function generates a count matrix to quantify gene expression.
 
-# 3. Normalization to TPM:
+### 3. Normalization to TPM:
 
 Raw counts are normalized to Transcripts Per Million (TPM) to account for gene length and sequencing depth, enabling cross-sample comparison.
 
-# 4. Reordering Samples:
+### 4. Reordering Samples:
 
 Samples are reordered based on experimental conditions, and a metadata file is created to associate each sample with its treatment and sampling time.
 
-# 5. Exporting Results to csv files:
+### 5. Exporting Results to csv files:
 
 The raw count and TPM matrices are exported to CSV files. A reordered version of the matrices is also saved to match the experimental design.
 

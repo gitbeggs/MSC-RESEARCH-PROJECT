@@ -1,0 +1,3033 @@
+---
+title: "Aphids_DESEQ2"
+format: html
+editor: visual
+---
+
+## **Metatranscriptomics Aphid Project (MAPPED TO ACIDOVORAX)**
+
+```{r}
+
+#Required packages loaded
+
+library(GenomicFeatures)
+library(GenomicAlignments)
+library(DESeq2)
+library(edgeR)
+library(ape)
+library(ggplot2)
+library(rmarkdown)
+library(RColorBrewer)
+library(knitr)
+library(viridis)
+library(DESeq2)
+library(ggplot2)
+library(pheatmap)
+library(BiocManager)
+library(kableExtra)
+library(ggrepel)
+library(dplyr)
+library(tidyr)
+
+
+#Loading of GFF A.radicis genome file
+
+gff_file <- '~/Dropbox/Aphid_project_703/RNA_SEQ_A.radicis/256381E_Acidovoraxradicis.gff'
+df <- read.gff(gff_file)
+ID = rep(NA, nrow(df))
+locus_tag = rep(NA, nrow(df))
+product = rep(NA, nrow(df))
+gene_name = rep(NA, nrow(df))  # Added for gene name
+widths <- df$end - df$start + 1
+
+# Extraction of the relevant attributes from the GFF file
+for(k in 1:nrow(df)){
+  tmp <- unlist(strsplit(df$attributes[k], split = ';'))
+  for (i in 1:length(tmp)){
+    tmp2 = unlist(strsplit(tmp[i], split = '='))
+    if(tmp2[1] == 'ID') ID[k] <- tmp2[2]
+    if(tmp2[1] == 'locus_tag') locus_tag[k] <- tmp2[2]
+    if(tmp2[1] == 'product') product[k] <- tmp2[2]
+    if(tmp2[1] == 'gene') gene_name[k] <- tmp2[2]  # Gene name extraction
+  }
+}
+
+# Checking if the gene names are missing, if so its replaced with ID or locus_tag
+gene_name[is.na(gene_name)] <- ID[is.na(gene_name)]  # Fallback to ID if gene_name is unavaiable
+
+# Fix seqid
+df$seqid <- as.vector(df$seqid)
+df$seqid[df$seqid == '1'] <- '1 length=5542670 depth=1.00x circular=true'
+
+# Creation dataframe with gene names, strain A.radicis
+SB = data.frame(
+  strain = rep('Aradicis', nrow(df)),
+  seqid = df$seqid,
+  type = df$type,
+  ID,
+  locus_tag,
+  product,
+  gene_name,  # Add gene_name to the dataframe
+  strand = df$strand,
+  start = df$start,
+  end = df$end,
+  widths = widths
+)
+
+# GRanges object made to show length and location of gene in the genome, and what strand its on (+ or -)
+
+featuresB <- GRanges(
+  seqnames = SB$seqid,
+  ranges = IRanges(start = SB$start, end = SB$end),
+  strand = SB$strand,
+  group_id = SB[, c(1, 3:5)]
+)
+
+#Processing of A.radicis mapped BAM files
+
+#Code creates a table of gene expression counts, counting how many mRNA reads map to the     A.radicis genome in each BAM file.
+
+setwd('~/Dropbox/Aphid_project_703/RNA_SEQ_A.radicis/BAM_files_A.radicis')
+
+# Creation of list of BAM files
+bamfiles <- list.files(recursive = TRUE, pattern = "*bam$", full.names = TRUE) # * takes all files that contain bam 
+
+# Summmary of mapped reads overlaps
+olap <- summarizeOverlaps(featuresB, bamfiles, mode = 'Union')
+
+# Extraction of count matrix
+counts <- assay(olap)
+
+# Initialisation of transcripts per million (TPM) matrix
+TPMs <- matrix(NA, nrow(counts), ncol(counts))
+
+# 'ind' defined as all row indices
+ind <- 1:nrow(counts)
+
+# Computation of TPMs
+for(k in 1:ncol(counts)){
+  tmp <- counts[ind, k] / (SB$widths[ind] / 1000) 
+  #raw counts divided by gene lengths in kilobases for normalisation
+  pmF <- sum(tmp) / 1000000 #Divide by a million to get TPM
+  TPM <- tmp / pmF
+  TPMs[ind, k] <- TPM
+}
+
+# Extraction of sample names from BAM filenames
+sample_names <- basename(bamfiles)  # Extraction of just the filename
+sample_names <- sub("\\.bam$", "", sample_names)  # Removal of the ".bam" extension
+
+# Column names assigned to the count and TPM matrices
+colnames(counts) <- sample_names
+colnames(TPMs) <- sample_names
+
+# Row names (gene names) included
+rownames(counts) <- SB$gene_name  # Use gene names
+rownames(TPMs) <- SB$gene_name    # Use gene names
+
+# Wrote to CSV including row and column names
+write.csv(counts, 'raw_counts_with_gene_names.csv', row.names = TRUE)
+write.csv(TPMs, 'TPMs_with_gene_names.csv', row.names = TRUE)
+
+# Samples ordered by condition (see code comments)
+
+desired_order <- c(
+  "RNAseq_data_merged_1-RNA_CGR_01", "RNAseq_data_merged_2-RNA_CGR_02", "RNAseq_data_merged_3-RNA_CGR_03", "RNAseq_data_merged_4-RNA_CGR_04",    # acidovorax day 1 aphids
+  "RNAseq_data_merged_13-RNA_CGR_13", "RNAseq_data_merged_14-RNA_CGR_14", "RNAseq_data_merged_15-RNA_CGR_15", "RNAseq_data_merged_16-RNA_CGR_16",  # acidovorax day 7 aphids
+  "RNAseq_data_merged_22-RNA_CGR_22", "RNAseq_data_merged_23-RNA_CGR_23", "RNAseq_data_merged_24-RNA_CGR_24", "RNAseq_data_merged_25-RNA_CGR_25",  # acidovorax day 14 aphids
+  "RNAseq_data_merged_34-RNA_CGR_34", "RNAseq_data_merged_35-RNA_CGR_35", "RNAseq_data_merged_36-RNA_CGR_36", "RNAseq_data_merged_37-RNA_CGR_37",  # acidovorax day 1 no aphids
+  "RNAseq_data_merged_44-RNA_CGR_44", "RNAseq_data_merged_45-RNA_CGR_45", "RNAseq_data_merged_46-RNA_CGR_46",                            # acidovorax day 14 no aphids
+  "RNAseq_data_merged_9-RNA_CGR_9", "RNAseq_data_merged_10-RNA_CGR_10", "RNAseq_data_merged_11-RNA_CGR_11", "RNAseq_data_merged_12-RNA_CGR_12",  # No bacteria day 1 aphids
+  "RNAseq_data_merged_20-RNA_CGR_20", "RNAseq_data_merged_21-RNA_CGR_21",                                                  # No bacteria day 7 aphids
+  "RNAseq_data_merged_30-RNA_CGR_30", "RNAseq_data_merged_31-RNA_CGR_31", "RNAseq_data_merged_32-RNA_CGR_32", "RNAseq_data_merged_33-RNA_CGR_33",  # No bacteria day 14 aphids
+  "RNAseq_data_merged_42-RNA_CGR_42", "RNAseq_data_merged_43-RNA_CGR_43",                                                  # No bacteria day 1 no aphids
+  "RNAseq_data_merged_50-RNA_CGR_50", "RNAseq_data_merged_51-RNA_CGR_51", "RNAseq_data_merged_52-RNA_CGR_52", "RNAseq_data_merged_53-RNA_CGR_53",   # No bacteria day 14 no aphids
+  "RNAseq_data_merged_5-RNA_CGR_5", "RNAseq_data_merged_6-RNA_CGR_6", "RNAseq_data_merged_7-RNA_CGR_7", "RNAseq_data_merged_8-RNA_CGR_8",    # B.Subtilis day 1 aphids
+  "RNAseq_data_merged_17-RNA_CGR_17", "RNAseq_data_merged_18-RNA_CGR_18", "RNAseq_data_merged_19-RNA_CGR_19",                            # B.Subtilis day 7 aphids
+  "RNAseq_data_merged_26-RNA_CGR_26", "RNAseq_data_merged_27-RNA_CGR_27", "RNAseq_data_merged_28-RNA_CGR_28", "RNAseq_data_merged_29-RNA_CGR_29",  # B.Subtilis day 14 aphids
+  "RNAseq_data_merged_38-RNA_CGR_38", "RNAseq_data_merged_39-RNA_CGR_39", "RNAseq_data_merged_40-RNA_CGR_40", "RNAseq_data_merged_41-RNA_CGR_41",  # B.Subtilis day 1 no aphids
+  "RNAseq_data_merged_47-RNA_CGR_47", "RNAseq_data_merged_48-RNA_CGR_48", "RNAseq_data_merged_49-RNA_CGR_49"                             # B.Subtilis day 14 no aphids
+)
+# Your sample names in desired order
+# Your original sample names with "-" separator
+samples <- c(
+  "RNAseq_data_merged_1-RNA_CGR_01", "RNAseq_data_merged_2-RNA_CGR_02", "RNAseq_data_merged_3-RNA_CGR_03", "RNAseq_data_merged_4-RNA_CGR_04",    
+  "RNAseq_data_merged_13-RNA_CGR_13", "RNAseq_data_merged_14-RNA_CGR_14", "RNAseq_data_merged_15-RNA_CGR_15", "RNAseq_data_merged_16-RNA_CGR_16",  
+  "RNAseq_data_merged_22-RNA_CGR_22", "RNAseq_data_merged_23-RNA_CGR_23", "RNAseq_data_merged_24-RNA_CGR_24", "RNAseq_data_merged_25-RNA_CGR_25",  
+  "RNAseq_data_merged_34-RNA_CGR_34", "RNAseq_data_merged_35-RNA_CGR_35", "RNAseq_data_merged_36-RNA_CGR_36", "RNAseq_data_merged_37-RNA_CGR_37",  
+  "RNAseq_data_merged_44-RNA_CGR_44", "RNAseq_data_merged_45-RNA_CGR_45", "RNAseq_data_merged_46-RNA_CGR_46",                            
+  "RNAseq_data_merged_9-RNA_CGR_9", "RNAseq_data_merged_10-RNA_CGR_10", "RNAseq_data_merged_11-RNA_CGR_11", "RNAseq_data_merged_12-RNA_CGR_12",  
+  "RNAseq_data_merged_20-RNA_CGR_20", "RNAseq_data_merged_21-RNA_CGR_21",                                                  
+  "RNAseq_data_merged_30-RNA_CGR_30", "RNAseq_data_merged_31-RNA_CGR_31", "RNAseq_data_merged_32-RNA_CGR_32", "RNAseq_data_merged_33-RNA_CGR_33",  
+  "RNAseq_data_merged_42-RNA_CGR_42", "RNAseq_data_merged_43-RNA_CGR_43",                                                  
+  "RNAseq_data_merged_50-RNA_CGR_50", "RNAseq_data_merged_51-RNA_CGR_51", "RNAseq_data_merged_52-RNA_CGR_52", "RNAseq_data_merged_53-RNA_CGR_53",   
+  "RNAseq_data_merged_5-RNA_CGR_5", "RNAseq_data_merged_6-RNA_CGR_6", "RNAseq_data_merged_7-RNA_CGR_7", "RNAseq_data_merged_8-RNA_CGR_8",    
+  "RNAseq_data_merged_17-RNA_CGR_17", "RNAseq_data_merged_18-RNA_CGR_18", "RNAseq_data_merged_19-RNA_CGR_19",                            
+  "RNAseq_data_merged_26-RNA_CGR_26", "RNAseq_data_merged_27-RNA_CGR_27", "RNAseq_data_merged_28-RNA_CGR_28", "RNAseq_data_merged_29-RNA_CGR_29",  
+  "RNAseq_data_merged_38-RNA_CGR_38", "RNAseq_data_merged_39-RNA_CGR_39", "RNAseq_data_merged_40-RNA_CGR_40", "RNAseq_data_merged_41-RNA_CGR_41",  
+  "RNAseq_data_merged_47-RNA_CGR_47", "RNAseq_data_merged_48-RNA_CGR_48", "RNAseq_data_merged_49-RNA_CGR_49"
+)
+
+# Dash replaced with a dot to match count matrix column names
+samples_dot <- gsub("-", ".", samples)
+
+# Matching of conditions labels to samples
+conditions <- c(
+  rep("Acidovorax_day1_aphids", 4),
+  rep("Acidovorax_day7_aphids", 4),
+  rep("Acidovorax_day14_aphids", 4),
+  rep("Acidovorax_day1_no_aphids", 4),
+  rep("Acidovorax_day14_no_aphids", 3),
+  rep("NoBacteria_day1_aphids", 4),
+  rep("NoBacteria_day7_aphids", 2),
+  rep("NoBacteria_day14_aphids", 4),
+  rep("NoBacteria_day1_no_aphids", 2),
+  rep("NoBacteria_day14_no_aphids", 4),
+  rep("Bsubtilis_day1_aphids", 4),
+  rep("Bsubtilis_day7_aphids", 3),
+  rep("Bsubtilis_day14_aphids", 4),
+  rep("Bsubtilis_day1_no_aphids", 4),
+  rep("Bsubtilis_day14_no_aphids", 3)
+)
+
+# Final metadata dataframe created
+metadata <- data.frame(
+  sample = samples_dot,
+  condition = conditions
+)
+
+#Metadata wrote to csv file
+write.csv(metadata, "metadata.csv", row.names = FALSE)
+
+
+# Counts and TPM matrices reordered based on the sample names
+counts_reordered <- counts[, desired_order]
+TPMs_reordered <- TPMs[, desired_order]
+
+# Column names correctly assigned after reordering
+colnames(counts_reordered) <- desired_order
+colnames(TPMs_reordered) <- desired_order
+
+# Reordered data wrote to CSVs
+write.csv(counts_reordered, 'raw_counts_reordered.csv', row.names = TRUE)
+write.csv(TPMs_reordered, 'TPMs_reordered.csv', row.names = TRUE)
+
+# Count data and TPMs loaded
+counts <- read.csv('raw_counts_reordered.csv', row.names = 1)
+TPMs <- read.csv('TPMs_reordered.csv', row.names = 1)
+
+# raw count data read in
+counts = read.csv("raw_counts_reordered.csv", row.names = 1)
+
+#sample columns ensured to match the metadata sample order (53 samples)
+count_matrix = as.matrix(counts[,1:53])
+
+# Read in sample metadata
+meta = read.csv("metadata.csv", header=T, stringsAsFactors = F)
+#make sampleID the rownames
+rownames(meta) = meta$Sample
+
+#Set up for the DESeq2 differential expression analysis
+### remove outliers here
+keep <- which(!meta$sample%in%c('RNAseq_data_merged_50.RNA_CGR_50','RNAseq_data_merged_53.RNA_CGR_53','RNAseq_data_merged_5.RNA_CGR_5', 'RNAseq_data_merged_28.RNA_CGR_28'))
+meta <- meta[keep,]
+count_matrix <- count_matrix[,keep]
+
+# Setting up of DESeqDataSet
+dds <- DESeqDataSetFromMatrix(countData = count_matrix,
+                              colData = meta,
+                              design = ~condition)
+
+ncol(count_matrix)
+nrow(meta)
+
+colnames(count_matrix)[1:5]   # see a preview
+rownames(meta)[1:5]           # make sure these align
+
+# Rownames set using metadata
+rownames(meta) <- meta$sample  
+all(colnames(count_matrix) %in% rownames(meta))
+
+#group as factor set as a factor
+
+dds$condition<- factor(dds$condition, levels = c("Acidovorax_day1_aphids","Acidovorax_day7_aphids", "Acidovorax_day14_aphids", "Acidovorax_day1_no_aphids", "Acidovorax_day14_no_aphids", "NoBacteria_day1_aphids", "NoBacteria_day7_aphids", "NoBacteria_day14_aphids", "NoBacteria_day1_no_aphids", "NoBacteria_day14_no_aphids", "Bsubtilis_day1_aphids", "Bsubtilis_day7_aphids", "Bsubtilis_day14_aphids", "Bsubtilis_day1_no_aphids", "Bsubtilis_day14_no_aphids"))
+
+
+
+# any genes that are not expressed i.e. count of 0 in all samples are filtered out
+keep <- rowSums(counts(dds)) >= 1
+
+counts
+dds <- dds[keep,] #keeps genes that passed filtering
+
+dds <- estimateSizeFactors(dds)#estimation of size factors for each sample for library normalisation
+normalized_counts <- counts(dds, normalized=TRUE) #normalisation
+dds <- DESeq(dds) # deseq performed
+
+res <- results(dds, independentFiltering=FALSE)
+
+
+
+```
+
+Comparing Conditions using deseq2
+
+1.  Day 7 b.subtillis v a.radicis
+
+```{r}
+
+guides(color = guide_legend(override.aes = list(shape = 16)))
+
+
+# DE results for pairwise compairson
+res_day7_bsub_vs_acido <- results(dds, contrast = c("condition", "Bsubtilis_day7_aphids", "Acidovorax_day7_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day7_bsub_vs_acido[!is.na(res_day7_bsub_vs_acido$padj), ]
+
+#Filtered data converted to dataframe
+res_df <- as.data.frame(res_filtered)
+
+# Gene names assigned from original counts (before filtering)
+gene_names <- rownames(counts(dds, normalized = FALSE))
+res_df$gene <- gene_names[match(rownames(res_df), gene_names)]
+
+# Regulation category added for up or downregulated genes based on log fold change
+
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+top10_genes <- res_df[order(res_df$padj), ][1:10, ]#select top 10 genes by p adj
+
+library(ggrepel)
+
+# Filtering of significant genes
+sig_genes <- res_df[res_df$regulation != "Not Sig", ]
+
+# Volcano plot generated with top 10 significant genes labeled
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey")) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +
+  geom_text_repel(
+    data = sig_genes,
+    aes(label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.3,
+    max.overlaps = Inf
+  ) +
+  labs(
+    title = "Volcano Plot: Acidovorax vs B.subtilis (Day 7, Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 16))) +
+  theme_minimal()
+
+print(top10_genes)
+```
+
+2.  A.radicis day 1 v no bacteria (no aphids)
+
+```{r}
+# DE results for pairwise compairson
+
+res_day1_acido_vs_nobac <- results(dds, contrast = c("condition", "Acidovorax_day1_no_aphids", "NoBacteria_day1_no_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day1_acido_vs_nobac[!is.na(res_day1_acido_vs_nobac$padj), ]
+
+# Converted to dataframe & add gene names added
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Filtering of significant genes
+sig_genes <- res_df[res_df$regulation != "Not Sig", ]
+
+# Volcano plot generated with top 10 significant genes labeled
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey")) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line added
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # to show up or down regulated
+  geom_text_repel(
+    data = sig_genes,
+    aes(label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.3,
+    max.overlaps = Inf
+  ) +
+  labs(
+    title = "Volcano Plot: Acidovorax vs No Bacteria
+                    (Day 1, No Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 16))) +  # Remove letter symbols from legend
+  theme_minimal()
+
+
+
+
+
+
+
+```
+
+Gene table for A.radicis v no bacteria day 1 (no aphids)
+
+```{r}
+# Data ordered by adjusted p-value (padj) and top 15 most significant genes selected
+top_15_genes <- res_df[order(res_df$padj), ][1:15, ]
+
+# Gene column added from rownames
+top_15_genes$Gene <- rownames(top_15_genes)
+
+# Row names reset to prevent them from being displayed as a separate column
+rownames(top_15_genes) <- NULL
+
+# Columns reordered: Gene, log2FoldChange, padj
+top_15_genes_table <- top_15_genes[, c("Gene", "log2FoldChange", "padj")]
+
+# Values rounded for better presentation
+top_15_genes_table$log2FoldChange <- round(top_15_genes_table$log2FoldChange, 2)
+top_15_genes_table$padj <- round(top_15_genes_table$padj, 4)
+
+
+# Table rendered as HTML
+top_15_genes_table %>%
+  kable("html", col.names = c("Gene", "log2 Fold Change", "Adjusted p-value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "blue") %>%
+  column_spec(3, color = "red") %>%
+  add_header_above(c("Top 15 Differentially Expressed Genes" = 3))  # Correct number of columns
+
+
+# Ensure all of the categories appear even if one has count 0
+reg_levels <- c("Up", "Down")
+reg_counts <- as.data.frame(table(factor(res_df$regulation, levels = reg_levels)))
+colnames(reg_counts) <- c("Regulation", "Count")
+
+# Plotting of bar chart
+ggplot(reg_counts, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes",
+    x = "Regulation",
+    y = "Number of Genes"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12)
+  )
+
+# Calculation of stats
+up_count <- sum(res_df$regulation == "Up")
+down_count <- sum(res_df$regulation == "Down")
+total_genes <- nrow(res_df)
+dysregulated_count <- up_count + down_count
+dysregulated_percent <- round((dysregulated_count / total_genes) * 100, 2) # gives as %
+
+# Creation of summary table
+reg_summary <- data.frame(
+  Metric = c(
+    "Upregulated Genes",
+    "Downregulated Genes",
+    "Total Genes",
+    "Percent Dysregulated"
+  ),
+  Value = c(
+    up_count,
+    down_count,
+    total_genes,
+    paste0(dysregulated_percent, "%")
+  )
+)
+
+reg_summary %>%
+  kable("html", col.names = c("Metric", "Value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  add_header_above(c("Differential Expression Summary" = 2)) 
+
+#creation of kable extra table for clear presentation of DE summary
+
+```
+
+A.radicis v no bacteria day 14 (no aphids)
+
+```{r}
+
+# DE results selected for Day 14 comparison
+res_day14_acido_vs_nobac <- results(dds, contrast = c("condition", "Acidovorax_day14_no_aphids", "NoBacteria_day14_no_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day14_acido_vs_nobac[!is.na(res_day14_acido_vs_nobac$padj), ]
+
+# Filtered data converted to dataframe
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Filtering of significant genes
+sig_genes <- subset(res_df, regulation %in% c("Up", "Down"))
+
+# Volcano plot generated with top 10 significant genes labeled
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line added
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +                # shows up or down regulated change line
+  geom_text_repel(
+    data = sig_genes,
+    aes(label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.3,
+    max.overlaps = Inf
+  ) +
+  labs(
+    title = "Volcano Plot: Acidovorax vs No Bacteria 
+                   (Day 14, No Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +
+  theme_minimal()
+
+```
+
+Tables for acido v bacteria day 14 no aphids
+
+```{r}
+# Data ordered by adjusted p-value (padj) and top 15 most significant genes selected
+
+top_15_genes <- res_df[order(res_df$padj), ][1:15, ]
+
+# Gene column added from rownames
+top_15_genes$Gene <- rownames(top_15_genes)
+
+# Row names reset to prevent them from being displayed as a separate column
+
+rownames(top_15_genes) <- NULL
+
+# Columns reordered: Gene, log2FoldChange, padj
+
+top_15_genes_table <- top_15_genes[, c("Gene", "log2FoldChange", "padj")]
+
+# Values rounded for better presentation
+
+top_15_genes_table$log2FoldChange <- round(top_15_genes_table$log2FoldChange, 2)
+top_15_genes_table$padj <- round(top_15_genes_table$padj, 4)
+
+# Table rendered as HTML
+
+top_15_genes_table %>%
+  kable("html", col.names = c("Gene", "log2 Fold Change", "Adjusted p-value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "blue") %>%
+  column_spec(3, color = "red") %>%
+  add_header_above(c("Top 15 Differentially Expressed Genes" = 3))  # Correct number of columns
+
+
+# Ensure all of the categories appear even if one has count 0
+
+reg_levels <- c("Up", "Down")
+reg_counts <- as.data.frame(table(factor(res_df$regulation, levels = reg_levels)))
+colnames(reg_counts) <- c("Regulation", "Count")
+
+# Plotting of bar chart
+ggplot(reg_counts, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes",
+    x = "Regulation",
+    y = "Number of Genes"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12)
+  )
+
+# Calculation of stats
+up_count <- sum(res_df$regulation == "Up")
+down_count <- sum(res_df$regulation == "Down")
+total_genes <- nrow(res_df)
+dysregulated_count <- up_count + down_count
+dysregulated_percent <- round((dysregulated_count / total_genes) * 100, 2)
+
+# Creation of summary table
+reg_summary <- data.frame(
+  Metric = c(
+    "Upregulated Genes",
+    "Downregulated Genes",
+    "Total Genes",
+    "Percent Dysregulated"
+  ),
+  Value = c(
+    up_count,
+    down_count,
+    total_genes,
+    paste0(dysregulated_percent, "%")
+  )
+)
+
+# Creation of kable extra table for clear presentation of DE summary
+
+reg_summary %>%
+  kable("html", col.names = c("Metric", "Value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  add_header_above(c("Differential Expression Summary" = 2))
+```
+
+4.  A.radicis v no bacteria day 1 aphids
+
+```{r}
+# DE results for pairwise compairson
+
+res_day1_acido_vs_nobac_aphids <- results(dds, contrast = c("condition", "Acidovorax_day1_aphids", "NoBacteria_day1_aphids"))
+
+# Removal of NA padj values
+
+res_filtered <- res_day1_acido_vs_nobac_aphids[!is.na(res_day1_acido_vs_nobac_aphids$padj), ]
+
+# Converted to dataframe & add gene names added
+
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Filtering of significant genes
+
+top_genes <- res_df[order(res_df$padj), ][1:3, ]
+
+
+# Volcano plot generated with top 10 significant genes labeled
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line added
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # shows up or down regulated
+  geom_text_repel(
+    data = top_genes,
+    aes(label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.3,
+    max.overlaps = Inf
+  ) +
+  labs(
+    title = "Volcano Plot: Acidovorax vs No Bacteria 
+                 (Day 1, With Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +  # legend title changed to "Expression"
+  theme_minimal()
+
+
+```
+
+Table of most sig genes: a.radicis v no bacteria day 1 aphids
+
+```{r}
+# Data ordered by adjusted p-value (padj) and top 15 most significant genes selected
+
+top_15_genes <- res_df[order(res_df$padj), ][1:45, ]
+
+# Gene column added from rownames
+
+top_15_genes$Gene <- rownames(top_15_genes)
+
+# Row names reset to prevent them from being displayed as a separate column
+
+rownames(top_15_genes) <- NULL
+
+# Columns reordered: Gene, log2FoldChange, padj
+
+top_15_genes_table <- top_15_genes[, c("Gene", "log2FoldChange", "padj")]
+
+# Values rounded for better presentation
+
+top_15_genes_table$log2FoldChange <- round(top_15_genes_table$log2FoldChange, 2)
+top_15_genes_table$padj <- round(top_15_genes_table$padj, 4)
+
+# Table rendered as HTML
+
+top_15_genes_table %>%
+  kable("html", col.names = c("Gene", "log2 Fold Change", "Adjusted p-value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "blue") %>%
+  column_spec(3, color = "red") %>%
+  add_header_above(c("Top 15 Differentially Expressed Genes" = 3))  # Correct number of columns
+
+
+# Ensure all of the categories appear even if one has count 0
+
+reg_levels <- c("Up", "Down")
+reg_counts <- as.data.frame(table(factor(res_df$regulation, levels = reg_levels)))
+colnames(reg_counts) <- c("Regulation", "Count")
+
+# Plotting of bar chart
+
+ggplot(reg_counts, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes",
+    x = "Regulation",
+    y = "Number of Genes"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12)
+  )
+
+# Calculation of stats
+
+up_count <- sum(res_df$regulation == "Up")
+down_count <- sum(res_df$regulation == "Down")
+total_genes <- nrow(res_df)
+dysregulated_count <- up_count + down_count
+dysregulated_percent <- round((dysregulated_count / total_genes) * 100, 2)
+
+# Creation of summary table
+
+reg_summary <- data.frame(
+  Metric = c(
+    "Upregulated Genes",
+    "Downregulated Genes",
+    "Total Genes",
+    "Percent Dysregulated"
+  ),
+  Value = c(
+    up_count,
+    down_count,
+    total_genes,
+    paste0(dysregulated_percent, "%")
+  )
+)
+
+#creation of kable extra table for clear presentation of DE summary
+
+reg_summary %>%
+  kable("html", col.names = c("Metric", "Value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  add_header_above(c("Differential Expression Summary" = 2))
+
+
+```
+
+5.  A.radicis v no bacteria day 7 (aphids)
+
+```{r}
+# DE results for Day 7 aphid comparison
+res_day7_acido_vs_nobac_aphids <- results(dds, contrast = c("condition", "Acidovorax_day7_aphids", "NoBacteria_day7_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day7_acido_vs_nobac_aphids[!is.na(res_day7_acido_vs_nobac_aphids$padj), ]
+
+# Converted to dataframe & add gene names added
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Filtering of significant genes
+top_genes <- res_df[order(res_df$padj), ][1:10, ]
+
+# Load ggplot2 and ggrepel
+library(ggplot2)
+library(ggrepel)
+
+# Volcano plot generated with top 10 significant genes labeled (without label lines)
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # log2FC = 0 reference
+  geom_text_repel(
+    data = top_genes,
+    aes(label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.3,
+    max.overlaps = Inf,
+    segment.color = NA  # Remove connecting lines from labels
+  ) +
+  labs(
+    title = "Volcano Plot: Acidovorax vs No Bacteria (Day 7, With Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +
+  theme_minimal()
+
+# Counting of DEGs by regulation status
+deg_counts <- as.data.frame(table(res_df$regulation))
+colnames(deg_counts) <- c("Regulation", "Count")
+
+# Preview of counts
+print(deg_counts)
+
+```
+
+Table of most sig genes: A.radicis v no bacteria day 7 aphids
+
+```{r}
+# Data ordered by adjusted p-value (padj) and top 15 most significant genes selected
+
+top_15_genes <- res_df[order(res_df$padj), ][1:22, ]
+
+# Gene column added from rownames
+
+top_15_genes$Gene <- rownames(top_15_genes)
+
+# Row names reset to prevent them from being displayed as a separate column
+
+rownames(top_15_genes) <- NULL
+
+# Columns reordered: Gene, log2FoldChange, padj
+
+top_15_genes_table <- top_15_genes[, c("Gene", "log2FoldChange", "padj")]
+
+# Values rounded for better presentation
+
+top_15_genes_table$log2FoldChange <- round(top_15_genes_table$log2FoldChange, 2)
+top_15_genes_table$padj <- round(top_15_genes_table$padj, 4)
+
+# Table rendered as HTML
+top_15_genes_table %>%
+  kable("html", col.names = c("Gene", "log2 Fold Change", "Adjusted p-value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "blue") %>%
+  column_spec(3, color = "red") %>%
+  add_header_above(c("Top 15 Differentially Expressed Genes" = 3))  # Correct number of columns
+
+# Ensure all of the categories appear even if one has count 0
+
+reg_levels <- c("Up", "Down")
+reg_counts <- as.data.frame(table(factor(res_df$regulation, levels = reg_levels)))
+colnames(reg_counts) <- c("Regulation", "Count")
+
+# Plotting of bar chart
+
+ggplot(reg_counts, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes",
+    x = "Regulation",
+    y = "Number of Genes"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12)
+  )
+
+# Calculation of stats
+up_count <- sum(res_df$regulation == "Up")
+down_count <- sum(res_df$regulation == "Down")
+total_genes <- nrow(res_df)
+dysregulated_count <- up_count + down_count
+dysregulated_percent <- round((dysregulated_count / total_genes) * 100, 2)
+
+# Creation of summary table
+reg_summary <- data.frame(
+  Metric = c(
+    "Upregulated Genes",
+    "Downregulated Genes",
+    "Total Genes",
+    "Percent Dysregulated"
+  ),
+  Value = c(
+    up_count,
+    down_count,
+    total_genes,
+    paste0(dysregulated_percent, "%")
+  )
+)
+
+#creation of kable extra table for clear presentation of DE summary
+
+reg_summary %>%
+  kable("html", col.names = c("Metric", "Value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  add_header_above(c("Differential Expression Summary" = 2))
+```
+
+6.  A.radicis v no bacteria day 14 (aphids)
+
+```{r}
+
+# DE results for pairwise compairson
+
+res_day14_acido_vs_nobac_aphids <- results(dds, contrast = c("condition", "Acidovorax_day14_aphids", "NoBacteria_day14_aphids"))
+View(as.data.frame(res_day14_acido_vs_nobac_aphids))
+# Removal of NA padj values
+
+res_filtered <- res_day14_acido_vs_nobac_aphids[!is.na(res_day14_acido_vs_nobac_aphids$padj), ]
+
+# Converted to dataframe & add gene names added
+
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Volcano plot generated with top 10 significant genes labeled
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # No fold change line
+  labs(
+    title = "Volcano Plot: Acidovorax vs No Bacteria (Day 14, With Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +  # Change legend title to "Expression"
+  theme_minimal()
+
+
+```
+
+Table of most sig genes: A.radicis v no bacteria day 14 aphids
+
+```{r}
+# Data ordered by adjusted p-value (padj) and top 15 most significant genes selected
+
+top_15_genes <- res_df[order(res_df$padj), ][1:15, ]
+
+# Gene column added from rownames
+top_15_genes$Gene <- rownames(top_15_genes)
+
+# Row names reset to prevent them from being displayed as a separate column
+
+rownames(top_15_genes) <- NULL
+
+# Columns reordered: Gene, log2FoldChange, padj
+
+top_15_genes_table <- top_15_genes[, c("Gene", "log2FoldChange", "padj")]
+
+# Values rounded for better presentation
+
+top_15_genes_table$log2FoldChange <- round(top_15_genes_table$log2FoldChange, 2)
+top_15_genes_table$padj <- round(top_15_genes_table$padj, 4)
+
+
+# Table rendered as HTML
+
+top_15_genes_table %>%
+  kable("html", col.names = c("Gene", "log2 Fold Change", "Adjusted p-value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "blue") %>%
+  column_spec(3, color = "red") %>%
+  add_header_above(c("Top 15 Differentially Expressed Genes" = 3))  # Correct number of columns
+
+
+# Ensure all of the categories appear even if one has count 0
+
+reg_levels <- c("Up", "Down")
+reg_counts <- as.data.frame(table(factor(res_df$regulation, levels = reg_levels)))
+colnames(reg_counts) <- c("Regulation", "Count")
+
+# Plotting of bar chart
+ggplot(reg_counts, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes",
+    x = "Regulation",
+    y = "Number of Genes"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12)
+  )
+
+# Calculation of stats
+up_count <- sum(res_df$regulation == "Up")
+down_count <- sum(res_df$regulation == "Down")
+total_genes <- nrow(res_df)
+dysregulated_count <- up_count + down_count
+dysregulated_percent <- round((dysregulated_count / total_genes) * 100, 2)
+
+# Creation of summary table
+reg_summary <- data.frame(
+  Metric = c(
+    "Upregulated Genes",
+    "Downregulated Genes",
+    "Total Genes",
+    "Percent Dysregulated"
+  ),
+  Value = c(
+    up_count,
+    down_count,
+    total_genes,
+    paste0(dysregulated_percent, "%")
+  )
+)
+
+reg_summary %>%
+  kable("html", col.names = c("Metric", "Value")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  add_header_above(c("Differential Expression Summary" = 2))
+
+#creation of kable extra table for clear presentation of DE summary
+```
+
+Table of most sig genes: A.radicis v b.subtilis day 1 no aphids
+
+```{r}
+# DE results for pairwise compairson
+
+res_day7_bsub_vs_acido <- results(dds, contrast = c("condition", "Bsubtilis_day1_aphids", "Acidovorax_day1_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day7_bsub_vs_acido[!is.na(res_day7_bsub_vs_acido$padj), ]
+
+# Converted to dataframe & add gene names added
+res_df <- as.data.frame(res_filtered)
+
+#Gene names added to dataframe
+
+gene_names <- rownames(counts(dds, normalized = FALSE))
+res_df$gene <- gene_names[match(rownames(res_df), gene_names)]
+
+# Regulation category added for up or downregulated genes based on log fold change
+
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Data ordered by adjusted p-value (padj) and top 15 most significant genes selected
+
+top15_genes <- res_df[order(res_df$padj), ][1:15, ]
+
+# View the table
+print(top15_genes)
+
+# final table formatted
+top15_table <- top15_genes[, c("gene", "log2FoldChange", "padj", "regulation")]
+print(top15_table)
+
+
+
+```
+
+## **Volcano plot comparison: APHID V NO APHID acidovorax**
+
+7.  ACIDOVORAX (NO APHIDS) V ACIDOVORAX (APHIDS) DAY 1
+
+```{r}
+# DE results for pairwise compairson
+
+res_day1_acido_vs_noaphid_aphids <- results(dds, contrast = c("condition", "Acidovorax_day1_aphids", "Acidovorax_day1_no_aphids"))
+
+# Removal of NA padj values
+
+res_filtered <- res_day1_acido_vs_noaphid_aphids[!is.na(res_day1_acido_vs_noaphid_aphids$padj), ]
+
+# Converted to dataframe & add gene names added
+
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Volcano plot generated with top 10 significant genes labeled
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line added
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # shows up or down regulated 
+  labs(
+    title = "Volcano Plot: Acidovorax Day 1 (Aphids) vs Acidovorax Day 1 (No Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +  # Change legend title to "Expression"
+  theme_minimal()
+
+```
+
+8.  ACIDOVORAX (NO APHIDS) V ACIDOVORAX (APHIDS) DAY 14
+
+```{r}
+# DE results for pairwise compairson
+
+res_day1_acido_vs_noaphid_aphids <- results(dds, contrast = c("condition", "Acidovorax_day14_aphids", "Acidovorax_day14_no_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day1_acido_vs_noaphid_aphids[!is.na(res_day1_acido_vs_noaphid_aphids$padj), ]
+
+# Converted to dataframe & add gene names added
+
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Volcano plot generated with top 10 significant genes labeled
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line added
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # shows up or down regulated
+  labs(
+    title = "Volcano Plot: Acidovorax Day 1 (Aphids) vs Acidovorax Day 1 (No Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +  # Change legend title to "Expression"
+  theme_minimal()
+
+```
+
+# **Heatmap comparisons**
+
+1.  Acidovorax v no bacteria day 1 (aphids)
+
+```{r}
+library(DESeq2)
+library(pheatmap)
+library(dplyr)
+
+# Define selected samples for Acidovorax vs No Bacteria (Day 1, Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02", 
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04", 
+  "RNAseq_data_merged_9.RNA_CGR_9", "RNAseq_data_merged_10.RNA_CGR_10", 
+  "RNAseq_data_merged_11.RNA_CGR_11", "RNAseq_data_merged_12.RNA_CGR_12"
+)
+
+# Get normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subset to selected samples
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Remove rows with missing values
+normalized_counts_subset <- normalized_counts_subset[complete.cases(normalized_counts_subset), ]
+
+# Get top 39 DEGs based on lowest padj
+top_39_genes <- res_day1_df %>%
+  arrange(padj) %>%
+  slice_head(n = 39) %>%
+  pull(gene)
+
+# Subset normalized counts to top 39 genes
+normalized_counts_subset_top39 <- normalized_counts_subset[top_39_genes, ]
+
+# Create annotation for sample conditions
+annotation_col <- data.frame(
+  condition = rep(c("Acidovorax_day1", "NoBacteria_day1"), each = 4)
+)
+rownames(annotation_col) <- colnames(normalized_counts_subset_top39)
+
+# Generate heatmap
+pheatmap(normalized_counts_subset_top39,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         scale = "row",
+         show_rownames = TRUE,
+         show_colnames = TRUE,
+         annotation_col = annotation_col,
+         main = "Top 39 DEGs: Acidovorax Day 1 vs No Bacteria (Aphids)",
+         fontsize = 6,
+         fontsize_row = 6,
+         fontsize_col = 6,
+         angle_col = 45,
+         filename = "heatmap_top39_deg_day1.png",
+         treeheight_row = 50,
+         treeheight_col = 50,
+         legend = TRUE,
+         mar = c(10, 10, 10, 25)
+)
+
+
+ncol(normalized_counts_subset_top50)
+nrow(annotation_col_conditions_df)
+length(annotation_col_conditions)
+length(colnames(normalized_counts_subset_top50))
+
+```
+
+2.  Acidovorax v no bacteria day 7 (aphids)
+
+```{r}
+# Selected samples defined for Acidovorax vs No Bacteria (Day 7, Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_13.RNA_CGR_13", "RNAseq_data_merged_14.RNA_CGR_14", 
+  "RNAseq_data_merged_15.RNA_CGR_15", "RNAseq_data_merged_16.RNA_CGR_16", 
+  "RNAseq_data_merged_20.RNA_CGR_20", "RNAseq_data_merged_21.RNA_CGR_21"
+)
+
+# The counts matrix was subsetted based on selected samples
+counts_subset <- counts(dds)[, selected_samples, drop =FALSE]
+
+# Checked alignment of column and row names with selected samples
+colnames(counts_subset)
+rownames(counts_subset)
+
+# Counts normalised
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Normalised counts subsetted for the selected samples
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Removal of rows or columns with any NA, NaN, or Inf values
+normalized_counts_subset <- normalized_counts_subset[complete.cases(normalized_counts_subset), ]
+
+# Top 50 most variable genes selected based on variance 
+gene_variance <- apply(normalized_counts_subset, 1, var)
+top_genes <- order(gene_variance, decreasing = TRUE)[1:50]
+
+# Counts subsetted to only include the top 50 most variable genes
+normalized_counts_subset_top50 <- normalized_counts_subset[top_genes, ]
+
+# Condition vector manually defined to match selected samples (4 Acidovorax, 2 No Bacteria replicates)
+annotation_col_conditions <- c(
+  "Acidovorax_day7", "Acidovorax_day7",
+  "Acidovorax_day7", "Acidovorax_day7",
+  "NoBacteria_day7", "NoBacteria_day7"
+)
+
+# Condition vector converted into a dataframe
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+
+# Row names assigned to annotation data frame using column names of the heatmap data
+rownames(annotation_col_conditions_df) <- colnames(normalized_counts_subset_top50)
+
+# Structure of annotation data frame checked
+str(annotation_col_conditions_df)
+
+# Gene names added to top variable gene matrix
+gene_names <- rownames(counts)
+rownames(normalized_counts_subset_top50) <- gene_names[top_genes]
+
+# Heatmap generated for Acidovorax vs No Bacteria (Day 7, Aphids)
+pheatmap(normalized_counts_subset_top50,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         scale = "row",
+         show_rownames = TRUE,  # Ensured gene names shown as rownames
+         show_colnames = TRUE,
+         annotation_col = annotation_col_conditions_df,
+         main = "Heatmap: Acidovorax Day 7 vs No Bacteria (Aphids)",
+         fontsize = 6,
+         fontsize_row = 6,
+         fontsize_col = 6,
+         angle_col = 45,  # Rotation of x-axis labels
+         filename = "heatmap_acido_day7_vs_nobac_aphids.png",
+         treeheight_row = 50, 
+         treeheight_col = 50,
+         legend = TRUE,
+         mar = c(10, 10, 10, 25)  # Bottom margin increased
+)
+
+
+```
+
+3.  Acidovorax v no bacteria day 14 (aphids)
+
+```{r}
+# Selected samples defined for Acidovorax vs No Bacteria (Day 14, Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23", 
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25", 
+  "RNAseq_data_merged_30.RNA_CGR_30", "RNAseq_data_merged_31.RNA_CGR_31", 
+  "RNAseq_data_merged_32.RNA_CGR_32", "RNAseq_data_merged_33.RNA_CGR_33"
+)
+
+# The counts matrix was subsetted based on selected samples
+counts_subset <- counts(dds)[, selected_samples, drop =FALSE]
+
+# Counts normalised
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Normalised counts subsetted for the selected samples
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Removal of rows or columns with any NA, NaN, or Inf values
+normalized_counts_subset <- normalized_counts_subset[complete.cases(normalized_counts_subset), ]
+
+# Top 50 most variable genes selected based on variance 
+gene_variance <- apply(normalized_counts_subset, 1, var)
+top_genes <- order(gene_variance, decreasing = TRUE)[1:50]
+
+# Counts subsetted to only include the top 50 most variable genes
+normalized_counts_subset_top50 <- normalized_counts_subset[top_genes, ]
+
+# Condition vector manually defined to match selected samples (4 Acidovorax, 4 No Bacteria replicates)
+annotation_col_conditions <- rep(c("Acidovorax_day14", "NoBacteria_day14"), each = 4)
+
+# Condition vector converted into a dataframe
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+
+# Structure of annotation data frame checked
+str(annotation_col_conditions_df)
+
+# Gene names added to top variable gene matrix
+gene_names <- rownames(counts)
+rownames(normalized_counts_subset_top50) <- gene_names[top_genes]
+
+# Row names assigned to annotation data frame using column names of the heatmap data
+rownames(annotation_col_conditions_df) <- colnames(normalized_counts_subset_top50)
+
+# Heatmap generated for Acidovorax vs No Bacteria (Day 14, Aphids)
+pheatmap(normalized_counts_subset_top50,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         scale = "row",
+         show_rownames = TRUE,  # Ensured gene names shown as rownames
+         show_colnames = TRUE,
+         annotation_col = annotation_col_conditions_df,
+         main = "Heatmap: Acidovorax Day 14 vs No Bacteria (Aphids)",
+         fontsize = 6,
+         fontsize_row = 6,
+         fontsize_col = 6,
+         angle_col = 45,  # Rotation of x-axis labels
+         filename = "heatmap_acido_day14_vs_nobac_aphids.png",
+         treeheight_row = 50, 
+         treeheight_col = 50,
+         legend = TRUE,
+         mar = c(10, 10, 10, 25)  # Bottom margin increased
+)
+
+```
+
+4.  Acidovorax v no bacteria day 1 (no aphids)
+
+```{r}
+
+# Selected samples defined for Acidovorax vs No Bacteria (Day 1, No Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35", 
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37", 
+  "RNAseq_data_merged_42.RNA_CGR_42", "RNAseq_data_merged_43.RNA_CGR_43"
+)
+
+# The counts matrix was subsetted based on selected samples
+counts_subset <- counts(dds)[, selected_samples, drop = FALSE]
+
+# Counts normalised
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Normalised counts subsetted for the selected samples
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Removal of rows or columns with any NA, NaN, or Inf values
+normalized_counts_subset <- normalized_counts_subset[complete.cases(normalized_counts_subset), ]
+
+# Top 50 most variable genes selected based on variance 
+gene_variance <- apply(normalized_counts_subset, 1, var)
+top_genes <- order(gene_variance, decreasing = TRUE)[1:50]
+
+# Counts subsetted to only include the top 50 most variable genes
+normalized_counts_subset_top50 <- normalized_counts_subset[top_genes, ]
+
+# Condition vector manually defined to match selected samples (4 Acidovorax, 2 No Bacteria replicates)
+annotation_col_conditions <- c(
+  "Acidovorax_day1", "Acidovorax_day1", "Acidovorax_day1", "Acidovorax_day1",
+  "NoBacteria_day1", "NoBacteria_day1"
+)
+
+# Condition vector converted into a dataframe
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+
+# Row names assigned to annotation data frame using column names of the heatmap data
+rownames(annotation_col_conditions_df) <- colnames(normalized_counts_subset_top50)
+
+# Gene names added to top variable gene matrix
+gene_names <- rownames(counts)
+rownames(normalized_counts_subset_top50) <- gene_names[top_genes]
+
+# Heatmap generated for Acidovorax vs No Bacteria (Day 1, No Aphids)
+pheatmap(normalized_counts_subset_top50,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         scale = "row",
+         show_rownames = TRUE,  # Ensured gene names shown as rownames
+         show_colnames = TRUE,
+         annotation_col = annotation_col_conditions_df,
+         main = "Heatmap: Acidovorax Day 1 vs No Bacteria (No Aphids)",
+         fontsize = 6,
+         fontsize_row = 6,
+         fontsize_col = 6,
+         angle_col = 45,  # Rotation of x-axis labels
+         filename = "heatmap_acido_day1_vs_nobac_noaphids.png",
+         treeheight_row = 50, 
+         treeheight_col = 50,
+         legend = TRUE,
+         mar = c(10, 10, 10, 25)  # Bottom margin increased
+)
+
+
+```
+
+5.  Acidovorax v no bacteria day 14 (no aphids)
+
+```{r}
+
+# Selected samples defined for Acidovorax vs No Bacteria (Day 14, No Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45", 
+  "RNAseq_data_merged_46.RNA_CGR_46",
+  #"RNAseq_data_merged_50.RNA_CGR_50",  # excluded
+  "RNAseq_data_merged_51.RNA_CGR_51", "RNAseq_data_merged_52.RNA_CGR_52"
+  #"RNAseq_data_merged_53.RNA_CGR_53"   # excluded
+)
+
+#Samples 50 and 53 identified as outliers and therefore removed
+
+# The counts matrix was subsetted based on selected samples
+counts_subset <- counts(dds)[, selected_samples, drop = FALSE]
+
+# Counts normalised
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Normalised counts subsetted for the selected samples
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Removal of rows or columns with any NA, NaN, or Inf values
+normalized_counts_subset <- normalized_counts_subset[complete.cases(normalized_counts_subset), ]
+
+# Top 50 most variable genes selected based on variance 
+gene_variance <- apply(normalized_counts_subset, 1, var)
+top_genes <- order(gene_variance, decreasing = TRUE)[1:50]
+
+# Counts subsetted to only include the top 50 most variable genes
+normalized_counts_subset_top50 <- normalized_counts_subset[top_genes, ]
+
+# Condition vector manually defined to match selected samples (3 Acidovorax, 2 No Bacteria replicates)
+annotation_col_conditions <- c(
+  "Acidovorax_day14", "Acidovorax_day14", "Acidovorax_day14", 
+  "NoBacteria_day14", "NoBacteria_day14"
+)
+
+# Condition vector converted into a dataframe
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+
+# Row names assigned to annotation data frame using column names of the heatmap data
+rownames(annotation_col_conditions_df) <- colnames(normalized_counts_subset_top50)
+
+# Gene names added to top variable gene matrix
+gene_names <- rownames(counts)
+rownames(normalized_counts_subset_top50) <- gene_names[top_genes]
+
+# Heatmap generated for Acidovorax vs No Bacteria (Day 14, No Aphids)
+pheatmap(normalized_counts_subset_top50,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         scale = "row",
+         show_rownames = TRUE,  # Ensured gene names shown as rownames
+         show_colnames = TRUE,
+         annotation_col = annotation_col_conditions_df,
+         main = "Heatmap: Acidovorax Day 14 vs No Bacteria (No Aphids)",
+         fontsize = 6,
+         fontsize_row = 6,
+         fontsize_col = 6,
+         angle_col = 45,  # Rotation of x-axis labels
+         filename = "heatmap_acido_day14_vs_nobac_noaphids.png",
+         treeheight_row = 50, 
+         treeheight_col = 50,
+         legend = TRUE,
+         mar = c(10, 10, 10, 25)  # Bottom margin increased
+)
+
+```
+
+# **PCA:**
+
+# **1. ACIDOVORAX V NO BACTERIA DAY 1 (APHIDS)**
+
+```{r}
+
+# Defined selected samples for PCA analysis (Day 1, Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02", 
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04", 
+  "RNAseq_data_merged_9.RNA_CGR_9", "RNAseq_data_merged_10.RNA_CGR_10", 
+  "RNAseq_data_merged_11.RNA_CGR_11", "RNAseq_data_merged_12.RNA_CGR_12"
+)
+
+# Extracted normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized count matrix to include only the selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with zero expression across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed the data so that samples became rows and genes became columns (required for PCA)
+pca_input <- t(normalized_counts_all_genes)
+
+# Ran Principal Component Analysis (PCA) on scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Defined the condition vector corresponding to the selected samples
+annotation_col_conditions <- rep(c("Acidovorax_day1", "NoBacteria_day1"), each = 4)
+
+# Created a data frame with condition annotations and assigned row names
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Formatted the PCA result into a data frame for plotting
+pca_df <- as.data.frame(pca_result$x)  # Principal component scores
+pca_df$condition <- annotation_col_conditions_df$condition  # Added treatment condition
+pca_df$sample <- rownames(pca_df)  # Added sample identifiers
+
+# Loaded necessary libraries for plotting
+library(ggplot2)
+library(ggrepel)
+
+# Generated the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +  # Plotted PCA points
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis label with variance %
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis label with variance %
+  ggtitle("PCA: Acidovorax vs No Bacteria, Day 1 (Aphids)") +  # Plot title
+  theme_minimal() +  # Applied a minimal theme
+  theme(plot.title = element_text(hjust = 0.5))  # Centered the plot title
+
+
+
+```
+
+# **2. ACIDOVORAX V NO BACTERIA DAY 7 (APHIDS)**
+
+```{r}
+# Defined selected samples for Day 7 Acidovorax vs No Bacteria (Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_13.RNA_CGR_13", "RNAseq_data_merged_14.RNA_CGR_14", 
+  "RNAseq_data_merged_15.RNA_CGR_15", "RNAseq_data_merged_16.RNA_CGR_16", 
+  "RNAseq_data_merged_20.RNA_CGR_20", "RNAseq_data_merged_21.RNA_CGR_21"
+)
+
+# Retrieved normalised counts from the DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalised counts matrix to include only the selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with zero expression across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed the matrix so that samples were rows and genes were columns (required for PCA)
+pca_input <- t(normalized_counts_all_genes)
+
+# Performed PCA on the scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated the percentage of variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created a condition vector for the selected samples
+annotation_col_conditions <- c(rep("Acidovorax_day7", 4), rep("NoBacteria_day7", 2))
+
+# Constructed an annotation data frame and assigned row names
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Converted PCA results into a data frame for plotting
+pca_df <- as.data.frame(pca_result$x)
+pca_df$condition <- annotation_col_conditions_df$condition
+pca_df$sample <- rownames(pca_df)
+
+# Loaded required libraries and generated the PCA plot
+library(ggplot2)
+library(ggrepel)
+
+# Generated the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +  # Plotted PCA points
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis label with variance %
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis label with variance %
+  ggtitle("PCA: Acidovorax vs No Bacteria, Day 14 Aphids") +  # Plot title
+  theme_minimal() +  # Applied a minimal theme
+  theme(plot.title = element_text(hjust = 0.5))  # Centered the plot title
+
+
+```
+
+# **3. ACIDOVORAX V NO BACTERIA DAY 14 (APHIDS)**
+
+```{r}
+
+# Defined selected samples for Day 14 Acidovorax vs No Bacteria (Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23", 
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25", 
+  "RNAseq_data_merged_30.RNA_CGR_30", "RNAseq_data_merged_31.RNA_CGR_31", 
+  "RNAseq_data_merged_32.RNA_CGR_32", "RNAseq_data_merged_33.RNA_CGR_33"
+)
+
+# Extracted normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized count matrix for selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with zero expression across all samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed the data so that samples became rows and genes became columns (required for PCA)
+pca_input <- t(normalized_counts_all_genes)
+
+# Ran Principal Component Analysis (PCA) on scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created condition vector for Day 14 (first 4 are Acidovorax, last 4 are NoBacteria)
+annotation_col_conditions <- c(rep("Acidovorax_day14", 4), rep("NoBacteria_day14", 4))
+
+# Created a data frame with condition annotations and assigned row names
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Formatted the PCA result into a data frame for plotting
+pca_df <- as.data.frame(pca_result$x)  # Principal component scores
+pca_df$condition <- annotation_col_conditions_df$condition  # Added treatment condition
+pca_df$sample <- rownames(pca_df)  # Added sample identifiers
+
+# Loaded necessary libraries for plotting
+library(ggplot2)
+library(ggrepel)
+
+# Generated the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +  # Plotted PCA points
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis label with variance %
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis label with variance %
+  ggtitle("PCA: Acidovorax vs No Bacteria, Day 14 Aphids") +  # Plot title
+  theme_minimal() +  # Applied a minimal theme
+  theme(plot.title = element_text(hjust = 0.5))  # Centered the plot title
+
+
+```
+
+# **4. ACIDOVORAX V NO BACTERIA (NO APHIDS) DAY 1**
+
+```{r}
+# Defined selected samples for Day 1 Acidovorax vs No Bacteria (No Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35", 
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37", 
+  "RNAseq_data_merged_42.RNA_CGR_42", "RNAseq_data_merged_43.RNA_CGR_43"
+)
+
+# Extracted normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized count matrix to include only selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with zero expression across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed the data so that samples became rows and genes became columns (required for PCA)
+pca_input <- t(normalized_counts_all_genes)
+
+# Ran Principal Component Analysis (PCA) on scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created condition vector (4 Acidovorax, 2 No Bacteria for Day 1, No Aphids)
+annotation_col_conditions <- c(rep("Acidovorax_day1_noaphids", 4), rep("NoBacteria_day1_noaphids", 2))
+
+# Created a data frame with condition annotations and assigned row names
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Formatted the PCA result into a data frame for plotting
+pca_df <- as.data.frame(pca_result$x)  # Principal component scores
+pca_df$condition <- annotation_col_conditions_df$condition  # Added treatment condition
+pca_df$sample <- rownames(pca_df)  # Added sample identifiers
+
+# Loaded necessary libraries for plotting
+library(ggplot2)
+library(ggrepel)
+
+# Generated the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +  # Plotted PCA points
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis label with variance %
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis label with variance %
+  ggtitle("PCA: Acidovorax vs No Bacteria (Day 1, No Aphids)") +  # Plot title
+  theme_minimal() +  # Applied a minimal theme
+  theme(plot.title = element_text(hjust = 0.5))  # Centered the plot title
+
+```
+
+# **5. ACIDOVORAX V NO BACTERIA (NO APHIDS) DAY 14**
+
+```{r}
+
+# Defined selected samples for Day 14 Acidovorax vs No Bacteria (No Aphids)
+selected_samples <- c(
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45", 
+  "RNAseq_data_merged_46.RNA_CGR_46",
+  #"RNAseq_data_merged_50.RNA_CGR_50",  # exlcuded
+  "RNAseq_data_merged_51.RNA_CGR_51", "RNAseq_data_merged_52.RNA_CGR_52"
+  #, "RNAseq_data_merged_53.RNA_CGR_53"  # excluded
+)
+
+# Extracted normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized count matrix to include only selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with zero expression across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed the data so that samples became rows and genes became columns (required for PCA)
+pca_input <- t(normalized_counts_all_genes)
+
+# Ran Principal Component Analysis (PCA) on scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created condition vector (3 Acidovorax, 2 No Bacteria for Day 14, No Aphids)
+annotation_col_conditions <- c(rep("Acidovorax_day14_noaphids", 3), rep("NoBacteria_day14_noaphids", 2))
+
+# Created a data frame with condition annotations and assigned row names
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Formatted the PCA result into a data frame for plotting
+pca_df <- as.data.frame(pca_result$x)  # Principal component scores
+pca_df$condition <- annotation_col_conditions_df$condition  # Added treatment condition
+pca_df$sample <- rownames(pca_df)  # Added sample identifiers
+
+
+# Generated the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +  # Plotted PCA points
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis label with variance %
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis label with variance %
+  ggtitle("PCA: Acidovorax vs No Bacteria (Day 14, No Aphids)") +  # Plot title
+  theme_minimal() +  # Applied a minimal theme
+  theme(plot.title = element_text(hjust = 0.5))  # Centered the plot title
+
+
+```
+
+# **6. ACIDOVORAX (NO APHIDS) V ACIDOVORAX (APHIDS) DAY 1**
+
+```{r}
+# Defined selected samples for Acidovorax (Aphids) vs Acidovorax (No Aphids), Day 1
+selected_samples <- c(
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02", 
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04", 
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35", 
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37"
+)
+
+# Extracted normalized counts
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted normalized counts for selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with 0 counts across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed count matrix for PCA (samples as rows, genes as columns)
+pca_input <- t(normalized_counts_all_genes)
+
+# Performed PCA on scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created condition vector for Acidovorax (Aphids) vs No Aphids, Day 1
+annotation_col_conditions <- c(rep("Acidovorax_Aphids_day1", 4), rep("Acidovorax_NoAphids_day1", 4))
+
+# Created annotation data frame with sample conditions
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Prepared PCA output for plotting
+pca_df <- as.data.frame(pca_result$x)
+pca_df$condition <- annotation_col_conditions_df$condition
+pca_df$sample <- rownames(pca_df)
+
+# Generated PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +
+  ggtitle("PCA: Acidovorax (Aphids) vs Acidovorax (No Aphids), Day 1") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+# **7. ACIDOVORAX (NO APHIDS) V ACIDOVORAX (APHIDS) DAY 14**
+
+```{r}
+# Defined selected samples for Acidovorax (Aphids) vs Acidovorax (No Aphids), Day 14
+selected_samples <- c(
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23", 
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25", 
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45", 
+  "RNAseq_data_merged_46.RNA_CGR_46"
+)
+
+# Extracted normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized count matrix to include only selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Removed genes with zero expression across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset_all) > 0
+normalized_counts_all_genes <- normalized_counts_subset_all[nonzero_genes, ]
+
+# Transposed the data so that samples became rows and genes became columns (required for PCA)
+pca_input <- t(normalized_counts_all_genes)
+
+# Performed Principal Component Analysis (PCA) on scaled data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created condition vector (4 Acidovorax + Aphids, 3 Acidovorax - Aphids) for Day 14
+annotation_col_conditions <- c(rep("Acidovorax_Aphids_day14", 4), rep("Acidovorax_NoAphids_day14", 3))
+
+# Created a data frame with condition annotations and assigned row names
+annotation_col_conditions_df <- data.frame(condition = annotation_col_conditions)
+rownames(annotation_col_conditions_df) <- selected_samples
+
+# Formatted the PCA result into a data frame for plotting
+pca_df <- as.data.frame(pca_result$x)  # Principal component scores
+pca_df$condition <- annotation_col_conditions_df$condition  # Added treatment condition
+pca_df$sample <- rownames(pca_df)  # Added sample identifiers
+
+# Generated the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 3) +  # Plotted PCA points
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis label with variance %
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis label with variance %
+  ggtitle("PCA: Acidovorax (Aphids) vs Acidovorax (No Aphid), Day 14") +  # Plot title
+  theme_minimal() +  # Applied a minimal theme
+  theme(plot.title = element_text(hjust = 0.5))  # Centered the plot title
+
+```
+
+# 8. PCA: acidovorax v no bacteria day 1 (aphids vs no aphids)
+
+```{r}
+# Defined all selected samples across aphid and no-aphid treatments
+selected_samples <- c(
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02", 
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04", 
+  "RNAseq_data_merged_9.RNA_CGR_9", "RNAseq_data_merged_10.RNA_CGR_10", 
+  "RNAseq_data_merged_11.RNA_CGR_11", "RNAseq_data_merged_12.RNA_CGR_12",
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35", 
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37", 
+  "RNAseq_data_merged_42.RNA_CGR_42", "RNAseq_data_merged_43.RNA_CGR_43"
+)
+
+# Extracted normalized counts from DESeqDataSet
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized count matrix to include only selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Filtered out low-expressed genes: kept genes with at least 10 counts in at least 3 samples
+keep_genes <- rowSums(normalized_counts_subset_all >= 10) >= 3
+normalized_counts_filtered <- normalized_counts_subset_all[keep_genes, ]
+
+# Selected top 500 most variable genes across samples for PCA
+top_var_genes <- head(order(apply(normalized_counts_filtered, 1, var), decreasing = TRUE), 500)
+
+# Transposed the matrix to have samples as rows and selected genes as columns
+pca_input <- t(normalized_counts_filtered[top_var_genes, ])
+
+# Performed Principal Component Analysis (PCA) on scaled expression data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by each principal component
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Defined treatment group for each sample (Acidovorax vs No Bacteria)
+treatment <- c(rep("Acidovorax", 4), rep("NoBacteria", 4), rep("Acidovorax", 4), rep("NoBacteria", 2))
+
+# Defined aphid presence condition for each sample
+aphids <- c(rep("Aphids", 8), rep("No Aphids", 6))
+
+# Created a data frame with PCA scores and sample metadata
+pca_df <- as.data.frame(pca_result$x)  # Principal component scores
+pca_df$treatment <- treatment  # Added treatment information
+pca_df$aphids <- aphids  # Added aphid presence condition
+pca_df$sample <- selected_samples  # Added sample IDs
+
+# Loaded necessary libraries for plotting
+library(ggplot2)
+library(ggrepel)
+
+# Plotted PCA: colored by aphid presence, shaped by treatment type
+ggplot(pca_df, aes(x = PC1, y = PC2, color = aphids, shape = treatment)) +
+  geom_point(size = 3) +  # Plot points with size
+  scale_shape_manual(values = c("Acidovorax" = 16, "NoBacteria" = 17)) +  # Circle for Acidovorax, triangle for NoBacteria
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis with PC1 variance
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis with PC2 variance
+  ggtitle("PCA: Day 1 – Aphid Presence and Treatment") +  # Plot title
+  theme_minimal() +  # Clean theme
+  theme(
+    plot.title = element_text(hjust = 0.5),  # Centered title
+    legend.title = element_blank()  # Removed legend title
+  )
+
+```
+
+# 9. PCA: acidovorax v no bacteria day 14 (aphids vs no aphids)
+
+```{r}
+# Combined Day 14 sample names including both Aphids and No Aphids groups
+selected_samples <- c(
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23", 
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25", 
+  "RNAseq_data_merged_30.RNA_CGR_30", "RNAseq_data_merged_31.RNA_CGR_31", 
+  "RNAseq_data_merged_32.RNA_CGR_32", "RNAseq_data_merged_33.RNA_CGR_33",
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45", 
+  "RNAseq_data_merged_46.RNA_CGR_46",
+  #"RNAseq_data_merged_50.RNA_CGR_50",  # Excluded sample
+  "RNAseq_data_merged_51.RNA_CGR_51", "RNAseq_data_merged_52.RNA_CGR_52"
+  #, "RNAseq_data_merged_53.RNA_CGR_53"  # Optional sample
+)
+
+# Extracted normalized counts from DESeqDataSet object
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the normalized counts matrix to retain only selected samples
+normalized_counts_subset_all <- normalized_counts[, selected_samples]
+
+# Filtered out low-expressed genes: retained those with at least 10 counts in at least 3 samples
+keep_genes <- rowSums(normalized_counts_subset_all >= 10) >= 3
+normalized_counts_filtered <- normalized_counts_subset_all[keep_genes, ]
+
+# Selected the top 500 most variable genes for PCA analysis
+top_var_genes <- head(order(apply(normalized_counts_filtered, 1, var), decreasing = TRUE), 500)
+
+# Transposed matrix: samples as rows, genes as columns
+pca_input <- t(normalized_counts_filtered[top_var_genes, ])
+
+# Performed PCA on scaled gene expression data
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated the percentage of variance explained by the first few principal components
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Defined sample treatment conditions (Acidovorax vs No Bacteria)
+treatment <- c(rep("Acidovorax", 4), rep("NoBacteria", 4), rep("Acidovorax", 3), rep("NoBacteria", 2))
+
+# Defined aphid presence condition (Aphids vs No Aphids)
+aphids <- c(rep("Aphids", 8), rep("No Aphids", 5))
+
+# Created data frame with PCA scores and metadata
+pca_df <- as.data.frame(pca_result$x)  # PCA scores
+pca_df$treatment <- treatment  # Treatment condition per sample
+pca_df$aphids <- aphids  # Aphid presence per sample
+pca_df$sample <- selected_samples  # Sample IDs
+
+# Loaded required libraries for plotting (ensure they are already loaded in your session)
+library(ggplot2)
+library(ggrepel)
+
+# Plotted PCA: colored by aphid presence, shaped by treatment type
+ggplot(pca_df, aes(x = PC1, y = PC2, color = aphids, shape = treatment)) +
+  geom_point(size = 3) +  # Plot points with size
+  scale_shape_manual(values = c("Acidovorax" = 16, "NoBacteria" = 17)) +  # Circle for Acidovorax, triangle for NoBacteria
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +  # X-axis with PC1 variance
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +  # Y-axis with PC2 variance
+  ggtitle("PCA: Day 14 – Aphid Presence and Treatment") +  # Plot title
+  theme_minimal() +  # Clean theme
+  theme(
+    plot.title = element_text(hjust = 0.5),  # Centered title
+    legend.title = element_blank()  # Removed legend title
+  )
+
+
+
+
+```
+
+# 10. PCA: ALL SAMPLES by aphid presence
+
+```{r}
+# Loaded required library
+library(ggplot2)
+
+# Defined selected samples across all conditions and time points
+selected_samples <- c(
+  # Acidovorax + Aphids
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02",
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04",       
+  "RNAseq_data_merged_13.RNA_CGR_13", "RNAseq_data_merged_14.RNA_CGR_14",
+  "RNAseq_data_merged_15.RNA_CGR_15", "RNAseq_data_merged_16.RNA_CGR_16",   
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23",
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25",   
+
+  # Acidovorax + No Aphids
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35",
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37",   
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45",
+  "RNAseq_data_merged_46.RNA_CGR_46",                                       
+
+  # No Bacteria + Aphids
+  "RNAseq_data_merged_9.RNA_CGR_9", "RNAseq_data_merged_10.RNA_CGR_10",
+  "RNAseq_data_merged_11.RNA_CGR_11", "RNAseq_data_merged_12.RNA_CGR_12",   
+  "RNAseq_data_merged_20.RNA_CGR_20", "RNAseq_data_merged_21.RNA_CGR_21",   
+  "RNAseq_data_merged_30.RNA_CGR_30", "RNAseq_data_merged_31.RNA_CGR_31",
+  "RNAseq_data_merged_32.RNA_CGR_32", "RNAseq_data_merged_33.RNA_CGR_33",   
+
+  # No Bacteria + No Aphids
+  "RNAseq_data_merged_42.RNA_CGR_42", "RNAseq_data_merged_43.RNA_CGR_43", "RNAseq_data_merged_51.RNA_CGR_51",
+  "RNAseq_data_merged_52.RNA_CGR_52"    
+)
+
+# Defined sample metadata
+treatment <- c(rep("Acidovorax", 19), rep("NoBacteria", 14))
+aphids <- c(rep("Aphids", 12), rep("NoAphids", 7), rep("Aphids", 10), rep("NoAphids", 4))
+day <- c(
+  rep("Day 1", 4), rep("Day 7", 4), rep("Day 14", 4),  # Acidovorax + Aphids
+  rep("Day 1", 4), rep("Day 14", 3),                   # Acidovorax + No Aphids
+  rep("Day 1", 4), rep("Day 7", 2), rep("Day 14", 4),  # No Bacteria + Aphids
+  rep("Day 1", 2), rep("Day 14", 2)                    # No Bacteria + No Aphids
+)
+
+# Extracted normalized counts from DESeq2 object
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subsetted the counts matrix to selected samples
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Removed genes with zero counts across all samples
+nonzero_genes <- rowSums(normalized_counts_subset) > 0
+normalized_counts_filtered <- normalized_counts_subset[nonzero_genes, ]
+
+# Transposed the matrix and performed PCA
+pca_input <- t(normalized_counts_filtered)
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained by PC1 and PC2
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Created a data frame containing PCA coordinates and metadata
+pca_df <- as.data.frame(pca_result$x)
+pca_df$treatment <- treatment
+pca_df$aphids <- aphids
+pca_df$day <- factor(day, levels = c("Day 1", "Day 7", "Day 14"))
+pca_df$sample <- rownames(pca_df)
+
+# Generated final PCA plot: colored by aphid status, shaped by treatment
+ggplot(pca_df, aes(x = PC1, y = PC2, color = aphids, shape = treatment, label = sample)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Aphids" = "purple", "NoAphids" = "orange")) +
+  scale_shape_manual(values = c("Acidovorax" = 16, "NoBacteria" = 15)) +  # Circle = Acidovorax, Square = NoBacteria
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +
+  ggtitle("PCA: Aphid Status and Treatment") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+```
+
+# 11. PCA all samples: By condition
+
+```{r}
+# Loaded required library
+library(ggplot2)
+
+# Defined selected samples across treatment and aphid conditions
+selected_samples <- c(
+  # Acidovorax + Aphids
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02",
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04",       
+  "RNAseq_data_merged_13.RNA_CGR_13", "RNAseq_data_merged_14.RNA_CGR_14",
+  "RNAseq_data_merged_15.RNA_CGR_15", "RNAseq_data_merged_16.RNA_CGR_16",   
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23",
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25",   
+
+  # Acidovorax + No Aphids
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35",
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37",   
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45",
+  "RNAseq_data_merged_46.RNA_CGR_46",                                       
+
+  # No Bacteria + Aphids
+  "RNAseq_data_merged_9.RNA_CGR_9", "RNAseq_data_merged_10.RNA_CGR_10",
+  "RNAseq_data_merged_11.RNA_CGR_11", "RNAseq_data_merged_12.RNA_CGR_12",   
+  "RNAseq_data_merged_20.RNA_CGR_20", "RNAseq_data_merged_21.RNA_CGR_21",   
+  "RNAseq_data_merged_30.RNA_CGR_30", "RNAseq_data_merged_31.RNA_CGR_31",
+  "RNAseq_data_merged_32.RNA_CGR_32", "RNAseq_data_merged_33.RNA_CGR_33",   
+
+  # No Bacteria + No Aphids
+  "RNAseq_data_merged_42.RNA_CGR_42", "RNAseq_data_merged_43.RNA_CGR_43", 
+  "RNAseq_data_merged_51.RNA_CGR_51", "RNAseq_data_merged_52.RNA_CGR_52"
+)
+
+# Defined metadata vectors
+day <- c(
+  rep("Day 1", 4), rep("Day 7", 4), rep("Day 14", 4),   # Acidovorax + Aphids
+  rep("Day 1", 4), rep("Day 14", 3),                    # Acidovorax + No Aphids
+  rep("Day 1", 4), rep("Day 7", 2), rep("Day 14", 4),   # No Bacteria + Aphids
+  rep("Day 1", 2), rep("Day 14", 2)                     # No Bacteria + No Aphids
+)
+
+treatment <- c(
+  rep("Acidovorax", 19),
+  rep("NoBacteria", 14)
+)
+
+aphids <- c(
+  rep("Aphids", 12),
+  rep("NoAphids", 7),
+  rep("Aphids", 10),
+  rep("NoAphids", 4)
+)
+
+# Created a combined group identifier
+group <- paste(treatment, aphids, sep = "_")
+
+# Retrieved normalized counts from DESeq2 object and subset to selected samples
+normalized_counts <- counts(dds, normalized = TRUE)
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Filtered out genes with zero total counts across all selected samples
+nonzero_genes <- rowSums(normalized_counts_subset) > 0
+normalized_counts_filtered <- normalized_counts_subset[nonzero_genes, ]
+
+# Transposed matrix for PCA and ran PCA
+pca_input <- t(normalized_counts_filtered)
+pca_result <- prcomp(pca_input, scale. = TRUE)
+
+# Calculated percent variance explained for PC1 and PC2
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Constructed PCA dataframe with metadata
+pca_df <- as.data.frame(pca_result$x)
+pca_df$treatment <- treatment
+pca_df$aphids <- aphids
+pca_df$day <- factor(day, levels = c("Day 1", "Day 7", "Day 14"))
+pca_df$group <- group
+pca_df$sample <- rownames(pca_df)
+
+# Generated PCA plot: color by group, shape by day
+ggplot(pca_df, aes(x = PC1, y = PC2, color = group, shape = day)) +
+  geom_point(size = 3) +
+  scale_shape_manual(values = c(16, 17, 15)) +  # Circle = Day 1, Triangle = Day 7, Square = Day 14
+  scale_color_manual(values = c(
+    "Acidovorax_Aphids" = "red",
+    "Acidovorax_NoAphids" = "red",
+    "NoBacteria_Aphids" = "blue",
+    "NoBacteria_NoAphids" = "blue"
+  )) +
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +
+  ggtitle("PCA: Acidovorax vs No Bacteria by Aphid Status and Day") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+# 12. PCA all samples + B.subtillis samples
+
+```{r}
+# Defined selected samples across treatment and aphid conditions
+selected_samples <- c(
+  # Acidovorax + Aphids
+  "RNAseq_data_merged_1.RNA_CGR_01", "RNAseq_data_merged_2.RNA_CGR_02",
+  "RNAseq_data_merged_3.RNA_CGR_03", "RNAseq_data_merged_4.RNA_CGR_04",       
+  "RNAseq_data_merged_13.RNA_CGR_13", "RNAseq_data_merged_14.RNA_CGR_14",
+  "RNAseq_data_merged_15.RNA_CGR_15", "RNAseq_data_merged_16.RNA_CGR_16",   
+  "RNAseq_data_merged_22.RNA_CGR_22", "RNAseq_data_merged_23.RNA_CGR_23",
+  "RNAseq_data_merged_24.RNA_CGR_24", "RNAseq_data_merged_25.RNA_CGR_25",   
+
+  # Acidovorax + No Aphids
+  "RNAseq_data_merged_34.RNA_CGR_34", "RNAseq_data_merged_35.RNA_CGR_35",
+  "RNAseq_data_merged_36.RNA_CGR_36", "RNAseq_data_merged_37.RNA_CGR_37",   
+  "RNAseq_data_merged_44.RNA_CGR_44", "RNAseq_data_merged_45.RNA_CGR_45",
+  "RNAseq_data_merged_46.RNA_CGR_46",                                       
+
+  # No Bacteria + Aphids
+  "RNAseq_data_merged_9.RNA_CGR_9", "RNAseq_data_merged_10.RNA_CGR_10",
+  "RNAseq_data_merged_11.RNA_CGR_11", "RNAseq_data_merged_12.RNA_CGR_12",   
+  "RNAseq_data_merged_20.RNA_CGR_20", "RNAseq_data_merged_21.RNA_CGR_21",   
+  "RNAseq_data_merged_30.RNA_CGR_30", "RNAseq_data_merged_31.RNA_CGR_31",
+  "RNAseq_data_merged_32.RNA_CGR_32", "RNAseq_data_merged_33.RNA_CGR_33",   
+
+  # No Bacteria + No Aphids
+  "RNAseq_data_merged_42.RNA_CGR_42", "RNAseq_data_merged_43.RNA_CGR_43", 
+  "RNAseq_data_merged_51.RNA_CGR_51", "RNAseq_data_merged_52.RNA_CGR_52",
+
+  # B. subtilis + Aphids (excluding 5 and 28)
+  "RNAseq_data_merged_6.RNA_CGR_6", "RNAseq_data_merged_7.RNA_CGR_7", "RNAseq_data_merged_8.RNA_CGR_8",
+  "RNAseq_data_merged_17.RNA_CGR_17", "RNAseq_data_merged_18.RNA_CGR_18", "RNAseq_data_merged_19.RNA_CGR_19",
+  "RNAseq_data_merged_26.RNA_CGR_26", "RNAseq_data_merged_27.RNA_CGR_27", "RNAseq_data_merged_29.RNA_CGR_29",
+
+  # B. subtilis + No Aphids
+  "RNAseq_data_merged_38.RNA_CGR_38", "RNAseq_data_merged_39.RNA_CGR_39",
+  "RNAseq_data_merged_40.RNA_CGR_40", "RNAseq_data_merged_41.RNA_CGR_41",
+  "RNAseq_data_merged_47.RNA_CGR_47", "RNAseq_data_merged_48.RNA_CGR_48",
+  "RNAseq_data_merged_49.RNA_CGR_49"
+)
+
+# Assigned sample metadata
+day <- c(
+  rep("Day 1", 4), rep("Day 7", 4), rep("Day 14", 4),   
+  rep("Day 1", 4), rep("Day 14", 3),                    
+  rep("Day 1", 4), rep("Day 7", 2), rep("Day 14", 4),   
+  rep("Day 1", 2), rep("Day 14", 2),                    
+  rep("Day 1", 3), rep("Day 7", 3), rep("Day 14", 3),   
+  rep("Day 1", 4), rep("Day 14", 3)                     
+)
+
+treatment <- c(
+  rep("Acidovorax", 19),
+  rep("NoBacteria", 14),
+  rep("Bsubtilis", 16)
+)
+
+aphids <- c(
+  rep("Aphids", 12),           
+  rep("NoAphids", 7),          
+  rep("Aphids", 10),           
+  rep("NoAphids", 4),          
+  rep("Aphids", 9),            
+  rep("NoAphids", 7)           
+)
+
+# Created combined group identifier
+group <- paste(treatment, aphids, sep = "_")
+
+# Defined color mapping for groups
+color_scale <- c(
+  "Acidovorax_Aphids" = "red",
+  "Acidovorax_NoAphids" = "orange",
+  "NoBacteria_Aphids" = "blue",
+  "NoBacteria_NoAphids" = "purple",
+  "Bsubtilis_Aphids" = "darkgreen",
+  "Bsubtilis_NoAphids" = "lightgreen"
+)
+
+# Extracted normalized counts and subsetted the matrix
+normalized_counts <- counts(dds, normalized = TRUE)
+normalized_counts_subset <- normalized_counts[, selected_samples]
+
+# Removed genes with zero total counts
+nonzero_genes <- rowSums(normalized_counts_subset) > 0
+normalized_counts_filtered <- normalized_counts_subset[nonzero_genes, ]
+
+# Transposed and scaled the matrix for PCA
+pca_input <- t(normalized_counts_filtered)
+pca_result <- prcomp(pca_input, scale. = TRUE)
+percent_var <- round(100 * (pca_result$sdev^2 / sum(pca_result$sdev^2)), 1)
+
+# Constructed PCA data frame with metadata
+pca_df <- as.data.frame(pca_result$x)
+pca_df$treatment <- treatment
+pca_df$aphids <- aphids
+pca_df$day <- factor(day, levels = c("Day 1", "Day 7", "Day 14"))
+pca_df$group <- group
+pca_df$sample <- rownames(pca_df)
+
+library(ggrepel)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, color = group, shape = day)) +
+  geom_point(size = 3) +
+  scale_shape_manual(values = c(16, 17, 15)) +
+  scale_color_manual(values = color_scale) +
+  xlab(paste0("PC1 (", percent_var[1], "%)")) +
+  ylab(paste0("PC2 (", percent_var[2], "%)")) +
+  ggtitle("PCA: Treatment and Aphid Status Across Time") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+> ```{r}
+> >
+> # Define comparisons for day 14
+> comparisons <- list(
+>   c("Acidovorax_day14_no_aphids", "Bsubtilis_day14_no_aphids"),
+>   c("Acidovorax_day14_no_aphids", "NoBacteria_day14_no_aphids"),
+>   c("Bsubtilis_day14_no_aphids", "NoBacteria_day14_no_aphids")
+> )
+> >
+> # Store DEG counts
+> deg_counts <- data.frame(Treatment = character(), Direction = character(), Num_DEGs = numeric())
+> >
+> # Loop over each pairwise comparison
+> for (cmp in comparisons) {
+>   res <- results(dds, contrast = c("condition", cmp[1], cmp[2]))
+>   res <- res[!is.na(res$padj), ]
+> >
+>   up <- res[res$padj < 1 & res$log2FoldChange > 1, ]
+>   down <- res[res$padj < 1 & res$log2FoldChange < -1, ]
+> >
+>   # Create a label for the treatment
+>   treatment_label <- paste(gsub("_day14_no_aphids", "", cmp[1]), "vs", gsub("_day14_no_aphids", "", cmp[2]))
+> >
+>   # Append results to the DEG counts data frame
+>   deg_counts <- rbind(
+>     deg_counts, 
+>     data.frame(Treatment = treatment_label, Direction = "Upregulated", Num_DEGs = nrow(up)),
+>     data.frame(Treatment = treatment_label, Direction = "Downregulated", Num_DEGs = nrow(down))
+>   )
+> }
+> >
+> # View results
+> print(deg_counts)
+> >
+> ```
+
+## **Metatranscriptomics Aphid Project (MAPPED TO B.subtilis)**
+
+```{r}
+#Original code without ordering / gene names
+# Load GFF
+gff_file <- '/Users/alexbeggs/Dropbox/Aphid_project_703/RNA_SEQ_.B_subtilis/252424E_Bacillussubtilis_trimmed.gff'
+df <- read.gff(gff_file)
+
+# Keep only CDS features
+df <- df[df$type == "CDS", ]
+
+# Extract attributes
+ID <- rep(NA, nrow(df))
+locus_tag <- rep(NA, nrow(df))
+product <- rep(NA, nrow(df))
+widths <- df$end - df$start + 1
+
+for(k in 1:nrow(df)){
+  tmp <- unlist(strsplit(df$attributes[k], split = ';'))
+  for(i in seq_along(tmp)){
+    tmp2 <- unlist(strsplit(tmp[i], split = '='))
+    if(length(tmp2) == 2){
+      if(tmp2[1] == 'ID') ID[k] <- tmp2[2]
+      if(tmp2[1] == 'locus_tag') locus_tag[k] <- tmp2[2]
+      if(tmp2[1] == 'product') product[k] <- tmp2[2]
+    }
+  }
+}
+
+# If seqid is just '1', leave it as-is (don't add long label unless BAMs require it)
+df$seqid <- as.vector(df$seqid)
+
+# Build SB dataframe
+SB <- data.frame(
+  strain = rep('Bsubtilis', nrow(df)),
+  seqid = df$seqid,
+  type = df$type,
+  ID = ID,
+  locus_tag = locus_tag,
+  product = product,
+  strand = df$strand,
+  start = df$start,
+  end = df$end,
+  widths = widths
+)
+
+# Create GRanges object
+featuresB <- GRanges(
+  seqnames = SB$seqid,
+  ranges = IRanges(start = SB$start, end = SB$end),
+  strand = SB$strand,
+  group_id = SB[, c(1, 3:5)]
+)
+
+# Set working directory with BAM files
+setwd('/Users/alexbeggs/Dropbox/Aphid_project_703/RNA_SEQ_.B_subtilis/BAM_files_B.subtilis')
+
+# Get list of BAM files
+bamfiles <- list.files(recursive = TRUE, pattern = "*bam$", full.names = TRUE)
+
+# Summarize overlaps (set singleEnd=FALSE if your reads are paired-end!)
+olap <- summarizeOverlaps(featuresB, bamfiles, mode = 'Union')
+
+# Extract count matrix
+counts <- assay(olap)
+
+# Initialize TPM matrix
+TPMs <- matrix(NA, nrow(counts), ncol(counts))
+ind <- 1:nrow(counts)
+
+# Compute TPMs
+for(k in 1:ncol(counts)){
+  tmp <- counts[ind, k] / (SB$widths[ind] / 1000) 
+  pmF <- sum(tmp) / 1e6
+  TPMs[ind, k] <- tmp / pmF
+}
+
+# Sample names from BAMs
+sample_names <- sub("\\.bam$", "", basename(bamfiles))
+colnames(counts) <- sample_names
+colnames(TPMs) <- sample_names
+
+# Assign gene names or fallback to ID
+gene_labels <- ifelse(is.na(SB$locus_tag), SB$ID, SB$locus_tag)
+rownames(counts) <- make.unique(gene_labels)
+rownames(TPMs) <- rownames(counts)
+
+# Save output
+write.csv(counts, 'raw_counts_b.subtilis.csv', row.names = TRUE)
+write.csv(TPMs, 'TPMs_b.subtilis.csv', row.names = TRUE)
+
+```
+
+```{r}
+#Sorting SB
+
+gff_file <- '/Users/alexbeggs/Dropbox/Aphid_project_703/RNA_SEQ_.B_subtilis/252424E_Bacillussubtilis_trimmed.gff'
+
+df <- read.gff(gff_file)
+ID = rep(NA, nrow(df))
+locus_tag = rep(NA, nrow(df))
+product = rep(NA, nrow(df))
+gene_name = rep(NA, nrow(df))  # Added for gene name
+widths <- df$end - df$start + 1
+
+# Extract relevant attributes from the GFF file
+for(k in 1:nrow(df)){
+  tmp <- unlist(strsplit(df$attributes[k], split = ';'))
+  for (i in 1:length(tmp)){
+    tmp2 = unlist(strsplit(tmp[i], split = '='))
+    if(tmp2[1] == 'ID') ID[k] <- tmp2[2]
+    if(tmp2[1] == 'locus_tag') locus_tag[k] <- tmp2[2]
+    if(tmp2[1] == 'product') product[k] <- tmp2[2]
+    if(tmp2[1] == 'gene') gene_name[k] <- tmp2[2]  # Extract gene name
+  }
+}
+
+# Check if gene names are missing and replace with ID or locus_tag
+gene_name[is.na(gene_name)] <- ID[is.na(gene_name)]  # Fallback to ID if gene_name is NA
+# Alternatively, you can use locus_tag instead of ID:
+# gene_name[is.na(gene_name)] <- locus_tag[is.na(gene_name)]
+
+# Fix seqid
+df$seqid <- as.vector(df$seqid)
+df$seqid[df$seqid == '1'] <- '1 length=4286715 depth=1.00x circular=true'
+
+# Create SB dataframe with gene names
+SB = data.frame(
+  strain = rep('Bsubtilis', nrow(df)),
+  seqid = df$seqid,
+  type = df$type,
+  ID,
+  locus_tag,
+  product,
+  gene_name,  # Add gene_name to the dataframe
+  strand = df$strand,
+  start = df$start,
+  end = df$end,
+  widths = widths
+)
+
+# Create GRanges object
+featuresB <- GRanges(
+  seqnames = SB$seqid,
+  ranges = IRanges(start = SB$start, end = SB$end),
+  strand = SB$strand,
+  group_id = SB[, c(1, 3:5)]
+)
+
+setwd('/Users/alexbeggs/Dropbox/Aphid_project_703/RNA_SEQ_.B_subtilis/BAM_files_B.subtilis')
+
+# Get list of BAM files
+bamfiles <- list.files(recursive = TRUE, pattern = "*bam$", full.names = TRUE)
+
+# Summarize overlaps
+olap <- summarizeOverlaps(featuresB, bamfiles, mode = 'Union')
+
+# Extract count matrix
+counts_bsubtilis <- assay(olap)
+
+# Initialize TPM matrix
+TPMs_bsubtilis <- matrix(NA, nrow(counts_bsubtilis), ncol(counts_bsubtilis))
+
+
+# Define 'ind' as all row indices
+ind <- 1:nrow(counts)
+
+# Compute TPMs
+for(k in 1:ncol(counts)){
+  tmp <- counts[ind, k] / (SB$widths[ind] / 1000) 
+  pmF <- sum(tmp) / 1000000
+  TPM <- tmp / pmF
+  TPMs[ind, k] <- TPM
+}
+
+# Extract sample names from BAM filenames
+sample_names <- basename(bamfiles)  # Extracts just the filename
+sample_names <- sub("\\.bam$", "", sample_names)  # Removes ".bam" extension
+
+# Assign column names to the count and TPM matrices
+colnames(counts) <- sample_names
+colnames(TPMs) <- sample_names
+
+# Ensure row names (gene names) are included
+rownames(counts) <- SB$gene_name  # Use gene names
+rownames(TPMs) <- SB$gene_name    # Use gene names
+
+# Write to CSV including row and column names
+write.csv(counts, 'raw_counts_b.subtilis.csv', row.names = TRUE)
+write.csv(TPMs, 'TPMs_b.subtilis.csv', row.names = TRUE)
+
+# Define the desired sample order by actual sample names (based on your specification)
+desired_order <- c(
+  "RNAseq_data_merged_1-RNA_CGR_01", "RNAseq_data_merged_2-RNA_CGR_02", "RNAseq_data_merged_3-RNA_CGR_03", "RNAseq_data_merged_4-RNA_CGR_04",    # acidovorax day 1 aphids
+  "RNAseq_data_merged_13-RNA_CGR_13", "RNAseq_data_merged_14-RNA_CGR_14", "RNAseq_data_merged_15-RNA_CGR_15", "RNAseq_data_merged_16-RNA_CGR_16",  # acidovorax day 7 aphids
+  "RNAseq_data_merged_22-RNA_CGR_22", "RNAseq_data_merged_23-RNA_CGR_23", "RNAseq_data_merged_24-RNA_CGR_24", "RNAseq_data_merged_25-RNA_CGR_25",  # acidovorax day 14 aphids
+  "RNAseq_data_merged_34-RNA_CGR_34", "RNAseq_data_merged_35-RNA_CGR_35", "RNAseq_data_merged_36-RNA_CGR_36", "RNAseq_data_merged_37-RNA_CGR_37",  # acidovorax day 1 no aphids
+  "RNAseq_data_merged_44-RNA_CGR_44", "RNAseq_data_merged_45-RNA_CGR_45", "RNAseq_data_merged_46-RNA_CGR_46",                            # acidovorax day 14 no aphids
+  "RNAseq_data_merged_9-RNA_CGR_9", "RNAseq_data_merged_10-RNA_CGR_10", "RNAseq_data_merged_11-RNA_CGR_11", "RNAseq_data_merged_12-RNA_CGR_12",  # No bacteria day 1 aphids
+  "RNAseq_data_merged_20-RNA_CGR_20", "RNAseq_data_merged_21-RNA_CGR_21",                                                  # No bacteria day 7 aphids
+  "RNAseq_data_merged_30-RNA_CGR_30", "RNAseq_data_merged_31-RNA_CGR_31", "RNAseq_data_merged_32-RNA_CGR_32", "RNAseq_data_merged_33-RNA_CGR_33",  # No bacteria day 14 aphids
+  "RNAseq_data_merged_42-RNA_CGR_42", "RNAseq_data_merged_43-RNA_CGR_43",                                                  # No bacteria day 1 no aphids
+  "RNAseq_data_merged_50-RNA_CGR_50", "RNAseq_data_merged_51-RNA_CGR_51", "RNAseq_data_merged_52-RNA_CGR_52", "RNAseq_data_merged_53-RNA_CGR_53",   # No bacteria day 14 no aphids
+  "RNAseq_data_merged_5-RNA_CGR_5", "RNAseq_data_merged_6-RNA_CGR_6", "RNAseq_data_merged_7-RNA_CGR_7", "RNAseq_data_merged_8-RNA_CGR_8",    # B.Subtilis day 1 aphids
+  "RNAseq_data_merged_17-RNA_CGR_17", "RNAseq_data_merged_18-RNA_CGR_18", "RNAseq_data_merged_19-RNA_CGR_19",                            # B.Subtilis day 7 aphids
+  "RNAseq_data_merged_26-RNA_CGR_26", "RNAseq_data_merged_27-RNA_CGR_27", "RNAseq_data_merged_28-RNA_CGR_28", "RNAseq_data_merged_29-RNA_CGR_29",  # B.Subtilis day 14 aphids
+  "RNAseq_data_merged_38-RNA_CGR_38", "RNAseq_data_merged_39-RNA_CGR_39", "RNAseq_data_merged_40-RNA_CGR_40", "RNAseq_data_merged_41-RNA_CGR_41",  # B.Subtilis day 1 no aphids
+  "RNAseq_data_merged_47-RNA_CGR_47", "RNAseq_data_merged_48-RNA_CGR_48", "RNAseq_data_merged_49-RNA_CGR_49"                             # B.Subtilis day 14 no aphids
+)
+
+```
+
+# LRT Testing
+
+1.  Testing for time effect across A.radicis innoculated barley
+
+```{r}
+dds_subset <- dds[, dds$condition %in% c("Acidovorax_day1_aphids", "Acidovorax_day7_aphids", "Acidovorax_day14_aphids")]
+dds_subset$time <- factor(gsub("Acidovorax_day|_aphids", "", dds_subset$condition))  # extract 1, 7, 14
+
+design(dds_subset) <- ~ time + condition
+dds_subset <- DESeq(dds_subset, test = "LRT", reduced = ~time)
+res_time <- results(dds_subset)
+
+head(res_time)
+head(res_time[order(res_time$padj), ])
+
+# Convert to dataframe
+res_df <- as.data.frame(res_time)
+
+# Add gene names as a column
+res_df$gene <- rownames(res_df)
+
+# Order by adjusted p-value
+res_ordered <- res_df[order(res_df$padj), ]
+
+# View top 10 genes
+head(res_ordered, 10)
+
+# Select and rename columns for clarity
+res_table <- res_ordered[, c("gene", "baseMean", "stat", "pvalue", "padj")]
+colnames(res_table) <- c("Gene", "BaseMean", "LRT_statistic", "Raw_pvalue", "Adjusted_pvalue")
+
+# Preview nicely
+print(res_table[1:10, ], row.names = FALSE)
+
+write.table(res_table, 
+            file = "LRT_acidovorax_timecourse_top_genes.tsv", 
+            sep = "\t", 
+            quote = FALSE, 
+            row.names = FALSE)
+
+View(res_table)
+
+summary(res_time)
+
+```
+
+2.  Testing for time effect no bacteria + aphids
+
+```{r}
+# Subset for No Bacteria with aphids over days 1, 7, and 14
+dds_subset_nb <- dds[, dds$condition %in% c("NoBacteria_day1_aphids", "NoBacteria_day7_aphids", "NoBacteria_day14_aphids")]
+
+# Create time variable from condition
+dds_subset_nb$time <- factor(gsub("NoBacteria_day|_aphids", "", dds_subset_nb$condition))  # extracts 1, 7, 14
+
+# Set up the design and run LRT
+design(dds_subset_nb) <- ~ time
+dds_subset_nb <- DESeq(dds_subset_nb, test = "LRT", reduced = ~1)
+
+# Get results
+res_time_nb <- results(dds_subset_nb)
+
+# Convert to dataframe and add gene names
+res_df_nb <- as.data.frame(res_time_nb)
+res_df_nb$gene <- rownames(res_df_nb)
+
+# Order by adjusted p-value
+res_ordered_nb <- res_df_nb[order(res_df_nb$padj), ]
+
+summary(res_time_nb)
+# Select key columns and rename
+res_table_nb <- res_ordered_nb[, c("gene", "baseMean", "stat", "pvalue", "padj")]
+colnames(res_table_nb) <- c("Gene", "BaseMean", "LRT_statistic", "Raw_pvalue", "Adjusted_pvalue")
+
+# Preview top results
+print(res_table_nb[1:10, ], row.names = FALSE)
+
+# Save to a tab-separated file
+write.table(res_table_nb, 
+            file = "LRT_nobacteria_aphids_timecourse_top_genes.tsv", 
+            sep = "\t", 
+            quote = FALSE, 
+            row.names = FALSE)
+
+# Optional: view the table in RStudio
+View(res_table_nb)
+
+```
+
+Bar chart of DEGS across days: A. radicis v no bacterias (aphids)
+
+```{r}
+# Retrieved DESeq2 results for Day 1 Acidovorax vs NoBacteria (both with aphids)
+res_day1_acido_vs_nobac <- results(dds, contrast = c("condition", "Acidovorax_day1_aphids", "NoBacteria_day1_aphids"))
+
+# Removed NAs from padj and filtered the results
+res_filtered <- res_day1_acido_vs_nobac[!is.na(res_day1_acido_vs_nobac$padj), ]
+
+# Converted the results to a dataframe
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Classified genes based on regulation status
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Counted the number of DEGs per category
+table(res_df$regulation)
+
+# Filtered to include only Up/Down-regulated genes
+res_day1_filtered <- res_df[res_df$regulation %in% c("Up", "Down"), ]
+
+# Ensured "Up" and "Down" categories were included, even if the count was 0
+deg_counts <- as.data.frame(table(factor(res_df$regulation, levels = c("Up", "Down"))))
+colnames(deg_counts) <- c("Regulation", "Count")
+
+# Plotted the bar chart for Day 1
+ggplot(deg_counts, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes\nAcidovorax vs No Bacteria (Day 1, Aphids)",
+    x = "Regulation Direction",
+    y = "Number of Genes"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+  )
+
+
+# Retrieved differential expression results for Acidovorax vs NoBacteria (Day 7, Aphids)
+res_day7 <- results(dds, contrast = c("condition", "Acidovorax_day7_aphids", "NoBacteria_day7_aphids"))
+
+# Removed NAs and converted to dataframe
+res_day7_df <- as.data.frame(res_day7[!is.na(res_day7$padj), ])
+res_day7_df$gene <- rownames(res_day7_df)
+
+# Classified genes as Up or Down based on thresholds
+res_day7_df$regulation <- NA
+res_day7_df$regulation[res_day7_df$padj < 0.05 & res_day7_df$log2FoldChange > 1] <- "Up"
+res_day7_df$regulation[res_day7_df$padj < 0.05 & res_day7_df$log2FoldChange < -1] <- "Down"
+
+# Filtered out "Not Sig" genes
+res_day7_filtered <- res_day7_df[!is.na(res_day7_df$regulation), ]
+
+# Ensured "Up" and "Down" categories were present and ordered correctly
+deg_counts_day7 <- as.data.frame(table(factor(res_day7_df$regulation, levels = c("Up", "Down"))))
+colnames(deg_counts_day7) <- c("Regulation", "Count")
+
+# Plotted the Day 7 bar chart
+ggplot(deg_counts_day7, aes(x = Regulation, y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes\nAcidovorax vs No Bacteria (Day 7, Aphids)",
+    x = "Regulation Direction",
+    y = "Number of Genes"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+  )
+
+```
+
+Generation of bar chart for DEGs: A.radicis v no bacteria (final)
+
+```{r}
+
+# Day 1 DEGs Processed
+res_day1 <- results(dds, contrast = c("condition", "Acidovorax_day1_aphids", "NoBacteria_day1_aphids"))
+res_day1_df <- as.data.frame(res_day1[!is.na(res_day1$padj), ]) #NA values removed
+res_day1_df$gene <- rownames(res_day1_df)
+res_day1_df$regulation <- "Not Sig"
+res_day1_df$regulation[res_day1_df$padj < 0.05 & res_day1_df$log2FoldChange > 1] <- "Up"
+res_day1_df$regulation[res_day1_df$padj < 0.05 & res_day1_df$log2FoldChange < -1] <- "Down"
+res_day1_df$time <- "Day 1"
+
+#Day 7 DEGs Processed
+res_day7 <- results(dds, contrast = c("condition", "Acidovorax_day7_aphids", "NoBacteria_day7_aphids"))
+res_day7_df <- as.data.frame(res_day7[!is.na(res_day7$padj), ]) #NA values removed
+res_day7_df$gene <- rownames(res_day7_df)
+res_day7_df$regulation <- "Not Sig"  # FIXED: use "Not Sig" for consistency
+res_day7_df$regulation[res_day7_df$padj < 0.05 & res_day7_df$log2FoldChange > 1] <- "Up"
+res_day7_df$regulation[res_day7_df$padj < 0.05 & res_day7_df$log2FoldChange < -1] <- "Down"
+res_day7_df$time <- "Day 7"
+
+#Day 14 DEGs Processed
+res_day14 <- results(dds, contrast = c("condition", "Acidovorax_day14_aphids", "NoBacteria_day14_aphids"))
+res_day14_df <- as.data.frame(res_day14[!is.na(res_day14$padj), ])#NA values removed
+res_day14_df$gene <- rownames(res_day14_df)
+res_day14_df$regulation <- "Not Sig"
+res_day14_df$regulation[res_day14_df$padj < 0.05 & res_day14_df$log2FoldChange > 1] <- "Up"
+res_day14_df$regulation[res_day14_df$padj < 0.05 & res_day14_df$log2FoldChange < -1] <- "Down"
+res_day14_df$time <- "Day 14"
+
+#All Days combined
+all_data <- bind_rows(res_day1_df, res_day7_df, res_day14_df)
+
+#Counting of Up/Down Regulated Genes
+deg_counts_all <- all_data %>%
+  filter(regulation %in% c("Up", "Down")) %>%
+  count(time, regulation, name = "Count")
+
+# time/regulation combination appear even with 0 counts (day 14)
+deg_counts_all_complete <- expand.grid(
+  time = c("Day 1", "Day 7", "Day 14"),
+  regulation = c("Up", "Down")
+) %>%
+  left_join(deg_counts_all, by = c("time", "regulation")) %>%
+  replace_na(list(Count = 0)) 
+
+# Set time order explicitly
+deg_counts_all_complete$time <- factor(deg_counts_all_complete$time, levels = c("Day 1", "Day 7", "Day 14"))
+
+# Plotting of 3 panel bar chart (day 1,7, 14)
+ggplot(deg_counts_all_complete, aes(x = regulation, y = Count, fill = regulation)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes\nAcidovorax vs No Bacteria (Aphids)",
+    x = "Regulation Direction",
+    y = "Number of DEGS"
+  ) +
+  facet_wrap(~ time, scales = "free_y") +
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 5)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+  )
+
+
+
+```
+
+DEGs across days B.subtilis inoculated mapped to A.radicis genome
+
+```{r}
+# Day 1 DEGs: B. subtilis vs No Bacteria (Aphids)
+res_day1 <- results(dds, contrast = c("condition", "Bsubtilis_day1_aphids", "NoBacteria_day1_aphids"))
+res_day1_df <- as.data.frame(res_day1[!is.na(res_day1$padj), ])
+res_day1_df$gene <- rownames(res_day1_df)
+res_day1_df$regulation <- "Not Sig"
+res_day1_df$regulation[res_day1_df$padj < 0.05 & res_day1_df$log2FoldChange > 1] <- "Up"
+res_day1_df$regulation[res_day1_df$padj < 0.05 & res_day1_df$log2FoldChange < -1] <- "Down"
+res_day1_df$time <- "Day 1"
+
+# Day 7 DEGs
+res_day7 <- results(dds, contrast = c("condition", "Bsubtilis_day7_aphids", "NoBacteria_day7_aphids"))
+res_day7_df <- as.data.frame(res_day7[!is.na(res_day7$padj), ])
+res_day7_df$gene <- rownames(res_day7_df)
+res_day7_df$regulation <- "Not Sig"
+res_day7_df$regulation[res_day7_df$padj < 0.05 & res_day7_df$log2FoldChange > 1] <- "Up"
+res_day7_df$regulation[res_day7_df$padj < 0.05 & res_day7_df$log2FoldChange < -1] <- "Down"
+res_day7_df$time <- "Day 7"
+
+# Day 14 DEGs
+res_day14 <- results(dds, contrast = c("condition", "Bsubtilis_day14_aphids", "NoBacteria_day14_aphids"))
+res_day14_df <- as.data.frame(res_day14[!is.na(res_day14$padj), ])
+res_day14_df$gene <- rownames(res_day14_df)
+res_day14_df$regulation <- "Not Sig"
+res_day14_df$regulation[res_day14_df$padj < 0.05 & res_day14_df$log2FoldChange > 1] <- "Up"
+res_day14_df$regulation[res_day14_df$padj < 0.05 & res_day14_df$log2FoldChange < -1] <- "Down"
+res_day14_df$time <- "Day 14"
+
+# Combine all time points
+all_data <- bind_rows(res_day1_df, res_day7_df, res_day14_df)
+
+# Count Up/Down regulated genes
+deg_counts_all <- all_data %>%
+  filter(regulation %in% c("Up", "Down")) %>%
+  count(time, regulation, name = "Count")
+
+# Ensure all combinations are present
+deg_counts_all_complete <- expand.grid(
+  time = c("Day 1", "Day 7", "Day 14"),
+  regulation = c("Up", "Down")
+) %>%
+  left_join(deg_counts_all, by = c("time", "regulation")) %>%
+  replace_na(list(Count = 0)) 
+
+# Set time order
+deg_counts_all_complete$time <- factor(deg_counts_all_complete$time, levels = c("Day 1", "Day 7", "Day 14"))
+
+# Plot
+ggplot(deg_counts_all_complete, aes(x = regulation, y = Count, fill = regulation)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.6) +
+  scale_fill_manual(values = c("Up" = "red", "Down" = "blue")) +
+  labs(
+    title = "Differentially Expressed Genes\nB. subtilis vs No Bacteria (Aphids)",
+    x = "Regulation Direction",
+    y = "Number of DEGs"
+  ) +
+  facet_wrap(~ time, scales = "free_y") +
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 5)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+  )
+
+
+```
+
+```{r}
+# DE results for pairwise comparison
+res_day1_bsub_vs_noaphid <- results(dds, contrast = c("condition", "Bsubtilis_day1_aphids", "Bsubtilis_day1_no_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day1_bsub_vs_noaphid[!is.na(res_day1_bsub_vs_noaphid$padj), ]
+
+# Convert to dataframe & add gene names
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Add regulation category based on log fold change
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Volcano plot
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +
+  labs(
+    title = "Volcano Plot: B. subtilis Day 1 (Aphids) vs B. subtilis Day 1 (No Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +
+  theme_minimal()
+
+
+```
+
+Volcano plots B.subtilis v no bacteria day 7 (aphids)
+
+```{r}
+# DE results for Day 7 aphid comparison
+res_day7_acido_vs_nobac_aphids <- results(dds, contrast = c("condition", "Bsubtilis_day7_aphids", "NoBacteria_day7_aphids"))
+
+# Removal of NA padj values
+res_filtered <- res_day7_acido_vs_nobac_aphids[!is.na(res_day7_acido_vs_nobac_aphids$padj), ]
+
+# Converted to dataframe & add gene names added
+res_df <- as.data.frame(res_filtered)
+res_df$gene <- rownames(res_df)
+
+# Regulation category added for up or downregulated genes based on log fold change
+res_df$regulation <- "Not Sig"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange > 1] <- "Up"
+res_df$regulation[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "Down"
+
+# Filtering of significant genes
+top_genes <- res_df[order(res_df$padj), ][1:10, ]
+
+# Load ggplot2 and ggrepel
+library(ggplot2)
+library(ggrepel)
+
+# Volcano plot generated with top 10 significant genes labeled (without label lines)
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(
+    values = c("Up" = "red", "Down" = "blue", "Not Sig" = "grey"),
+    labels = c("Up" = "Overexpressed", "Down" = "Underexpressed", "Not Sig" = "Not Significant")
+  ) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +  # Significance threshold line
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +             # log2FC = 0 reference
+  geom_text_repel(
+    data = top_genes,
+    aes(label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.3,
+    max.overlaps = Inf,
+    segment.color = NA  # Remove connecting lines from labels
+  ) +
+  labs(
+    title = "Volcano Plot: Acidovorax vs No Bacteria (Day 7, With Aphids)",
+    x = "log2 Fold Change",
+    y = "-log10 adjusted p-value"
+  ) +
+  guides(color = guide_legend(title = "Expression")) +
+  theme_minimal()
+```
